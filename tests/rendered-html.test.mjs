@@ -51,7 +51,9 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /Top down/);
   assert.match(html, /Bottom up/);
   assert.match(html, /Human guidance/);
-  assert.match(html, /Select a state for the solver to rethink/);
+  assert.match(html, /Select a state to guide the search/);
+  assert.match(html, /Fix selected state(?:'|&#x27;)s color/);
+  assert.match(html, /Select a state before fixing it to Coral/);
   assert.match(html, /Select a state first/);
   assert.match(html, /Branching search history/);
   assert.match(html, /DFS tree/);
@@ -70,13 +72,15 @@ test("statically renders the complete teaching interface", async () => {
 });
 
 test("ships the licensed map and a bounded auto-following branching tree", async () => {
-  const [page, layout, packageJson, mapAsset, labSource, labStyles] = await Promise.all([
+  const [page, layout, packageJson, mapAsset, labSource, labStyles, mapSource, mapStyles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../public/map/us-states.svg", import.meta.url), "utf8"),
     readFile(new URL("../app/MapColoringLab.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/map-coloring-lab.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/USMap.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/USMap.css", import.meta.url), "utf8"),
   ]);
 
   const stateIds = [...mapAsset.matchAll(/<path\s+id="([A-Z]{2})"/g)].map(
@@ -94,6 +98,9 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   assert.match(labSource, /className="tree-child-decisions"/);
   assert.match(labSource, /guideNextDecision/);
   assert.match(labSource, /learnerInterventions/);
+  assert.match(labSource, /fixedAssignments/);
+  assert.match(labSource, /fixedStates={fixedStateCodes}/);
+  assert.match(labSource, /Clear all \({fixedStateCodes\.length}\)/);
   assert.match(labSource, /viewport\.scrollTop = Math\.max/);
   assert.match(labSource, /viewport\.scrollLeft = Math\.max/);
   assert.match(
@@ -106,6 +113,10 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   );
   assert.match(labStyles, /\.tree-branches::before/);
   assert.match(labStyles, /\.tree-child-decisions::before/);
+  assert.match(labStyles, /\.fixed-color-options/);
+  assert.match(mapSource, /Human-assigned and locked/);
+  assert.match(mapSource, /usMap__lockShackle/);
+  assert.match(mapStyles, /\.usMap__outline--fixed/);
 
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
 });

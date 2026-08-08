@@ -17,6 +17,7 @@ After using the page, a learner should be able to explain:
 5. The number of available colors changes whether a valid coloring exists and how much search is required.
 6. Constraint propagation can eliminate entire families of complete assignments before depth-first search visits them.
 7. Variable order changes the shape of a depth-first search, and a human can deliberately redirect one decision without making the solver random.
+8. A learner-supplied state color is a fixed constraint: it immediately removes incompatible complete outcomes and, with propagation enabled, removes that color from neighboring domains.
 
 ## 3. Audience and tone
 
@@ -35,6 +36,7 @@ After using the page, a learner should be able to explain:
 - **Comparison mode:** the learner can turn constraint propagation on or off. Both modes use the same variable ordering, value ordering, palette, and validity checks so the visible difference in search work is attributable to propagation. Changing modes resets to the deterministic start of the corresponding trace.
 - **Variable ordering:** explicit DFS choices follow a learner-selected geographic scan of the displayed map: top-to-bottom or bottom-to-top, with stable horizontal ordering inside each row. Propagation may assign states ahead of the scan. The optional details sidebar must name the active rule.
 - **Human guidance:** selecting a state remains inspection-only. A separate “Rethink this state next” action may replace exactly one upcoming explicit DFS variable choice if that state is still unassigned. The intervention is recorded in the trace, deterministic replay preserves it, and the geographic scan resumes immediately afterward. If propagation assigns the requested state before that decision, the trace explains why the request was skipped.
+- **Human-fixed assignments:** after selecting a state, the learner may explicitly fix it to any palette color that does not conflict with an already fixed neighbor. Fixed assignments are visible as locks, remain unchanged across every DFS branch, and are replayed as educational events before ordinary search resumes. A learner may recolor or clear an individual fixed state, or clear all fixed states. Changing a fixed assignment pauses and restarts the trace so the map, DFS tree, and exact outcome count remain synchronized.
 - **Value ordering:** palette order, left to right, so a reset followed by Run always produces the same trace.
 - **Remaining search space:** the exact number of complete assignments of colors to all 50 states that have not yet been eliminated by constraints or search evidence. With `k` available colors, a fresh run starts at `k^50`; this is an outcome-space measure, not a count of future solver events or an estimate of runtime.
 - **Completion states:** solved, unsatisfiable for the selected palette, paused, or ready.
@@ -76,11 +78,12 @@ The controls remain close to the map and are usable on touch screens.
 - **Run / Pause**: starts and pauses automatic playback without resetting progress.
 - **Step**: advances exactly one solver event while paused.
 - **Back one step**: returns to the preceding recorded event for explanation and inspection; resuming from there continues deterministically.
-- **Reset**: returns to all states unassigned with full domains.
+- **Reset**: returns to the start of the deterministic trace with all domains full, then replays any learner-fixed assignments before ordinary DFS choices.
 - **Speed slider**: labeled from “Explain” to “Fast,” with the current interval expressed accessibly. Speed changes take effect during a run.
 - **Constraint propagation switch**: toggles propagation on/off, clearly labels the active mode, and regenerates the deterministic trace from the start for an honest comparison.
 - **State-order switch**: chooses a top-to-bottom or bottom-to-top geographic scan. Changing direction pauses and resets the trace so the new ordering is unambiguous.
 - **Human guidance**: after selecting an unassigned state, “Rethink [state] next” pauses playback and deterministically replaces the next explicit variable choice. A queued request can be canceled before it is applied; selection alone never changes search behavior.
+- **Assign a color**: after selecting a state, a compact palette lets the learner fix, recolor, or clear that state. A color already fixed on a land-border neighbor is disabled with an explanation, and a “Clear all” action removes every learner-fixed color.
 - **Palette control**: add or remove colors dynamically. Start with four visually distinct, color-vision-friendly colors. The engine accepts any palette length; the interface warns that very large palettes are visually compressed rather than changing solver semantics.
 - **Preset buttons**: “Try 3 colors,” “Classic 4,” and “Show a backtrack” provide quick teaching entry points. A preset may set palette and deterministic starting conditions, but must use the same solver rather than a prerecorded fake animation.
 - **Sticky monitor strip**: a compact strip remains visible while the learner uses the map or scrolls. It always shows the remaining search space, solver status, active propagation mode, and current playback speed. The speed value remains visible even when its slider is not.
@@ -182,6 +185,7 @@ The first version is complete when:
 13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
 14. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible while the default-collapsed details sidebar allows the main map-and-tree area to expand.
 15. Explicit DFS choices visibly follow the selected top-down or bottom-up map order, and a learner can redirect exactly one upcoming choice by selecting an unassigned state and invoking the separate rethink action.
+16. A learner can fix colors on specific states, see those states visibly locked, recolor or clear them, and observe the exact outcome space and neighboring domains respond before DFS continues; directly conflicting neighboring fixed colors cannot be entered.
 
 ## 12. Out of scope for the first version
 

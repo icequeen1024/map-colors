@@ -20,6 +20,7 @@ export interface LearnerIntervention {
 
 export type SolverEventType =
   | "ready"
+  | "human-assignment"
   | "select-variable"
   | "try-color"
   | "remove-color"
@@ -146,6 +147,8 @@ export interface TraceSnapshot {
 export interface GenerateTraceOptions {
   /** Enable domain reduction and automatic singleton assignment. Default true. */
   readonly propagationEnabled?: boolean;
+  /** Learner-chosen colors that remain fixed throughout search. */
+  readonly fixedAssignments?: Readonly<Partial<Record<StateCode, string>>>;
   /** Geographic direction used for explicit DFS variable choices. Default top-down. */
   readonly traversalDirection?: TraversalDirection;
   /** Deterministic one-time learner overrides keyed to DFS decision ordinals. */
@@ -341,6 +344,55 @@ function validatePalette(colorIds: readonly string[]): void {
   }
 }
 
+function validateFixedAssignments(
+  colorIds: readonly string[],
+  fixedAssignments:
+    | Readonly<Partial<Record<StateCode, string>>>
+    | undefined,
+): readonly Readonly<{ state: StateCode; colorId: string }>[] {
+  if (fixedAssignments === undefined) return Object.freeze([]);
+  if (
+    fixedAssignments === null ||
+    typeof fixedAssignments !== "object" ||
+    Array.isArray(fixedAssignments)
+  ) {
+    throw new TypeError("fixedAssignments must be an object keyed by state code.");
+  }
+
+  const validStates = new Set<string>(STATE_CODES);
+  const validColors = new Set(colorIds);
+  const validated: Array<{ state: StateCode; colorId: string }> = [];
+  for (const [state, colorId] of Object.entries(fixedAssignments)) {
+    if (!validStates.has(state)) {
+      throw new TypeError(`Unknown fixed-assignment state: ${state}`);
+    }
+    if (typeof colorId !== "string" || !validColors.has(colorId)) {
+      throw new TypeError(
+        `Fixed assignment for ${state} uses a color outside the palette: ${String(colorId)}`,
+      );
+    }
+    validated.push({ state: state as StateCode, colorId });
+  }
+  validated.sort((left, right) => left.state.localeCompare(right.state));
+
+  const byState = new Map(
+    validated.map(({ state, colorId }) => [state, colorId] as const),
+  );
+  for (const { state, colorId } of validated) {
+    for (const neighbor of ADJACENCY[state]) {
+      if (state < neighbor && byState.get(neighbor) === colorId) {
+        throw new RangeError(
+          `Fixed assignments conflict: ${STATE_NAMES[state]} and ${STATE_NAMES[neighbor]} both use ${colorId}.`,
+        );
+      }
+    }
+  }
+
+  return Object.freeze(
+    validated.map((assignment) => Object.freeze({ ...assignment })),
+  );
+}
+
 function freezeSearchTree(
   searchTree: readonly MutableSearchTreeDecision[],
   stack: readonly SearchFrame[],
@@ -406,6 +458,10 @@ export function generateTrace(
   options: GenerateTraceOptions = {},
 ): readonly TraceSnapshot[] {
   validatePalette(colorIds);
+  const fixedAssignmentList = validateFixedAssignments(
+    colorIds,
+    options.fixedAssignments,
+  );
   const propagationEnabled = options.propagationEnabled ?? true;
   const traversalDirection = options.traversalDirection ?? "top-down";
   const learnerInterventions = options.learnerInterventions ?? [];
@@ -431,6 +487,15 @@ export function generateTrace(
   const stateScanOrder = traversalDirection === "top-down"
     ? STATE_CODES_TOP_DOWN
     : STATE_CODES_BOTTOM_UP;
+  const fixedOrderIndexes = new Map(
+    stateScanOrder.map((state, index) => [state, index] as const),
+  );
+  const orderedFixedAssignments = Object.freeze(
+    [...fixedAssignmentList].sort(
+      (left, right) =>
+        fixedOrderIndexes.get(left.state)! - fixedOrderIndexes.get(right.state)!,
+    ),
+  );
   const directionLabel = traversalDirection === "top-down"
     ? "top to bottom"
     : "bottom to top";
@@ -627,6 +692,30 @@ export function generateTrace(
     return finalizeSnapshots();
   }
 
+  for (const { state, colorId } of orderedFixedAssignments) {
+    const previousDomain = [...initialState.domains[state]];
+    const volumeBeforePin = activeBranchVolume(initialState);
+    initialState.assignments[state] = colorId;
+    initialState.domains[state] = [colorId];
+    metrics.assignments += 1;
+    eliminateOutcomes(volumeBeforePin - activeBranchVolume(initialState));
+    emit(initialState, [], {
+      status: "searching",
+      currentState: state,
+      affectedState: state,
+      event: {
+        type: "human-assignment",
+        title: `${STATE_NAMES[state]} is fixed to ${colorId}`,
+        narration: `You fixed ${STATE_NAMES[state]} to ${colorId}. Search will preserve this choice in every branch.`,
+        formal: `${state} := ${colorId} (fixed by learner)`,
+        state,
+        colorId,
+        previousDomain,
+        nextDomain: [colorId],
+      },
+    });
+  }
+
   const chooseVariable = (
     state: WorkingState,
   ): {
@@ -814,6 +903,35 @@ export function generateTrace(
     }
     return true;
   };
+
+  if (propagationEnabled) {
+    for (const { state } of orderedFixedAssignments) {
+      if (propagate(initialState, state, [])) continue;
+      if (remainingOutcomeCount !== BigInt(0)) {
+        throw new Error(
+          "Contradictory fixed assignments left uneliminated outcomes.",
+        );
+      }
+      emit(
+        initialState,
+        [],
+        {
+          status: "unsatisfiable",
+          currentState: state,
+          event: {
+            type: "unsatisfiable",
+            title: "The fixed colors cannot be completed",
+            narration:
+              "Propagation proved that no complete coloring can preserve all of the learner's fixed choices.",
+            formal: "Fixed assignments imply an empty domain.",
+            state,
+          },
+        },
+        true,
+      );
+      return finalizeSnapshots();
+    }
+  }
 
   const search = (
     state: WorkingState,

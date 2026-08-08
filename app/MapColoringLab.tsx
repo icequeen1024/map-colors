@@ -67,6 +67,7 @@ function paletteText(text: string, palette: PaletteColor[]) {
 function eventTone(type: string) {
   if (type === "contradiction" || type === "unsatisfiable" || type === "limit-reached") return "danger";
   if (type === "solved") return "success";
+  if (type === "human-assignment") return "human";
   if (type === "backtrack") return "backtrack";
   if (type === "remove-color" || type === "forced-assignment") return "change";
   return "current";
@@ -331,19 +332,36 @@ export function MapColoringLab() {
     useState<TraversalDirection>("top-down");
   const [learnerInterventions, setLearnerInterventions] =
     useState<LearnerIntervention[]>([]);
+  const [fixedAssignments, setFixedAssignments] =
+    useState<Partial<Record<StateCode, string>>>({});
+  const [fixedAssignmentError, setFixedAssignmentError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedState, setSelectedState] = useState<StateCode | null>(null);
   const [stateQuery, setStateQuery] = useState("");
   const colorSequence = useRef(STARTER_PALETTE.length);
 
-  const trace = useMemo(
-    () => generateTrace(palette.map((color) => color.id), {
+  const traceResult = useMemo(() => {
+    const colorIds = palette.map((color) => color.id);
+    const options = {
       propagationEnabled,
       traversalDirection,
       learnerInterventions,
-    }),
-    [learnerInterventions, palette, propagationEnabled, traversalDirection],
-  );
+    };
+    try {
+      return {
+        trace: generateTrace(colorIds, { ...options, fixedAssignments }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        trace: generateTrace(colorIds, options),
+        error: error instanceof Error
+          ? error.message
+          : "Those fixed colors could not be applied.",
+      };
+    }
+  }, [fixedAssignments, learnerInterventions, palette, propagationEnabled, traversalDirection]);
+  const trace = traceResult.trace;
   const snapshot = trace[cursor] ?? trace[0];
   const atEnd = cursor >= trace.length - 1;
   const terminal =
@@ -382,6 +400,23 @@ export function MapColoringLab() {
   const pendingIntervention = learnerInterventions.find(
     (intervention) => intervention.decisionIndex === selectionCountAtCursor,
   );
+  const fixedStateCodes = useMemo(
+    () => STATE_CODES.filter((state) => fixedAssignments[state] !== undefined),
+    [fixedAssignments],
+  );
+  const selectedFixedColor = selectedState ? fixedAssignments[selectedState] : undefined;
+  const chosenFixedColor = chosenState ? fixedAssignments[chosenState] : undefined;
+  const fixedConflicts = useMemo(() => {
+    const conflicts = new Map<string, StateCode>();
+    if (!selectedState) return conflicts;
+    for (const neighbor of ADJACENCY[selectedState]) {
+      const neighborColor = fixedAssignments[neighbor];
+      if (neighborColor && !conflicts.has(neighborColor)) {
+        conflicts.set(neighborColor, neighbor);
+      }
+    }
+    return conflicts;
+  }, [fixedAssignments, selectedState]);
   const removalNotes = useMemo(() => {
     if (!chosenState) return [];
     const notes: string[] = [];
@@ -429,6 +464,12 @@ export function MapColoringLab() {
     setCursor(0);
     setSelectedState(null);
     setLearnerInterventions([]);
+    setFixedAssignmentError(null);
+    const nextColorIds = new Set(nextPalette.map((color) => color.id));
+    setFixedAssignments((current) => Object.fromEntries(
+      Object.entries(current).filter(([, colorId]) =>
+        colorId !== undefined && nextColorIds.has(colorId)),
+    ) as Partial<Record<StateCode, string>>);
     setPalette(nextPalette);
   }
 
@@ -438,6 +479,7 @@ export function MapColoringLab() {
     setCursor(0);
     setSelectedState(null);
     setLearnerInterventions([]);
+    setFixedAssignmentError(null);
     setPropagationEnabled(enabled);
   }
 
@@ -447,12 +489,52 @@ export function MapColoringLab() {
     setCursor(0);
     setSelectedState(null);
     setLearnerInterventions([]);
+    setFixedAssignmentError(null);
     setTraversalDirection(direction);
+  }
+
+  function fixSelectedState(colorId: string) {
+    if (!selectedState) return;
+    const conflictingNeighbor = fixedConflicts.get(colorId);
+    if (conflictingNeighbor) {
+      setFixedAssignmentError(
+        `${colorName(colorId, palette)} is unavailable because fixed neighbor ${STATE_NAMES[conflictingNeighbor]} already uses it.`,
+      );
+      return;
+    }
+
+    const nextFixedAssignments = { ...fixedAssignments, [selectedState]: colorId };
+    setPlaying(false);
+    setCursor(Object.keys(nextFixedAssignments).length);
+    setLearnerInterventions([]);
+    setFixedAssignmentError(null);
+    setFixedAssignments(nextFixedAssignments);
+  }
+
+  function clearSelectedFixedState() {
+    if (!selectedState || fixedAssignments[selectedState] === undefined) return;
+    const nextFixedAssignments = { ...fixedAssignments };
+    delete nextFixedAssignments[selectedState];
+    setPlaying(false);
+    setCursor(Object.keys(nextFixedAssignments).length);
+    setLearnerInterventions([]);
+    setFixedAssignmentError(null);
+    setFixedAssignments(nextFixedAssignments);
+  }
+
+  function clearAllFixedStates() {
+    if (fixedStateCodes.length === 0) return;
+    setPlaying(false);
+    setCursor(0);
+    setLearnerInterventions([]);
+    setFixedAssignmentError(null);
+    setFixedAssignments({});
   }
 
   function guideNextDecision() {
     if (
       !selectedState ||
+      fixedAssignments[selectedState] !== undefined ||
       snapshot.assignments[selectedState] !== undefined ||
       snapshot.domains[selectedState].length === 0 ||
       terminal
@@ -495,10 +577,12 @@ export function MapColoringLab() {
 
   const assignmentCount = Object.keys(snapshot?.assignments ?? {}).length;
   const selectedCanGuide = selectedState !== null &&
+    fixedAssignments[selectedState] === undefined &&
     snapshot.assignments[selectedState] === undefined &&
     snapshot.domains[selectedState].length > 0 &&
     !terminal;
   const event = snapshot.event;
+  const displayedFixedError = fixedAssignmentError ?? traceResult.error;
   const eventTitle = teachingTitle(event, palette);
   const remainingOutcomes = formatOutcomeCount(snapshot.outcomes.remaining);
   const humanCheckTime = formatHumanCheckTime(snapshot.outcomes.remaining);
@@ -776,29 +860,104 @@ export function MapColoringLab() {
               </div>
               <p>
                 <strong>{assignmentCount} of 50 assigned</strong>
-                <span>Colored count shows progress, not time remaining.</span>
+                <span>
+                  {fixedStateCodes.length > 0
+                    ? `${fixedStateCodes.length} fixed by you · colored count shows progress, not time remaining.`
+                    : "Colored count shows progress, not time remaining."}
+                </span>
               </p>
             </div>
             <div className="human-guidance" role="group" aria-label="Human search guidance">
-              <div>
+              <div className="guidance-summary">
                 <span>Human guidance</span>
                 <strong>
-                  {pendingIntervention
+                  {selectedState && selectedFixedColor
+                    ? `${STATE_NAMES[selectedState]} is fixed to ${colorName(selectedFixedColor, palette)}`
+                    : pendingIntervention
                     ? `${STATE_NAMES[pendingIntervention.state]} is queued for the next decision`
                     : selectedState
                       ? `${STATE_NAMES[selectedState]} selected`
-                      : "Select a state for the solver to rethink"}
+                      : "Select a state to guide the search"}
                 </strong>
                 <small>
-                  {pendingIntervention
+                  {selectedState && selectedFixedColor
+                    ? "This learner input survives backtracking. Choose another color to recolor it, or clear the pin."
+                    : pendingIntervention
                     ? `The ${traversalDirection === "top-down" ? "top-down" : "bottom-up"} scan resumes immediately afterward.`
                     : selectedState && snapshot.assignments[selectedState] !== undefined
                       ? "That state is already assigned in this snapshot. Choose an unassigned state."
                       : selectedState && snapshot.domains[selectedState].length === 0
                         ? "That state has no available colors in this contradiction. Choose another state."
-                        : "A learner request changes one decision only; selecting a state by itself never changes the search."}
+                        : "Fix a color for the whole run, or ask the solver to rethink one decision only."}
                 </small>
               </div>
+              <fieldset className="fixed-color-controls">
+                <legend>Fix selected state&apos;s color</legend>
+                <div className="fixed-color-options">
+                  {palette.map((color) => {
+                    const conflictingNeighbor = fixedConflicts.get(color.id);
+                    const disabled = selectedState === null || conflictingNeighbor !== undefined;
+                    const isFixed = selectedFixedColor === color.id;
+                    const stateName = selectedState ? STATE_NAMES[selectedState] : "the selected state";
+                    const explanationId = conflictingNeighbor
+                      ? `fixed-conflict-${selectedState}-${color.id}`
+                      : undefined;
+                    return (
+                      <button
+                        type="button"
+                        className="fixed-color-choice"
+                        key={color.id}
+                        style={{ "--choice-color": color.hex } as React.CSSProperties}
+                        aria-pressed={isFixed}
+                        aria-describedby={explanationId}
+                        aria-label={selectedState === null
+                          ? `Select a state before fixing it to ${color.name}`
+                          : conflictingNeighbor
+                            ? `${color.name} is unavailable for ${stateName} because fixed neighbor ${STATE_NAMES[conflictingNeighbor]} already uses it`
+                            : isFixed
+                              ? `${stateName} is fixed to ${color.name}`
+                              : `Fix ${stateName} to ${color.name}`}
+                        title={conflictingNeighbor
+                          ? `${color.name} is unavailable: ${STATE_NAMES[conflictingNeighbor]} is a fixed neighbor.`
+                          : selectedState
+                            ? `${isFixed ? "Keep" : "Fix"} ${stateName} ${color.name}`
+                            : "Select a state first"}
+                        disabled={disabled}
+                        onClick={() => fixSelectedState(color.id)}
+                      >
+                        <i aria-hidden="true">{color.symbol}</i>
+                        <span>{color.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedState && fixedConflicts.size > 0 && (
+                  <ul className="fixed-conflict-list" aria-label="Colors unavailable because of fixed neighbors">
+                    {[...fixedConflicts].map(([colorId, neighbor]) => (
+                      <li id={`fixed-conflict-${selectedState}-${colorId}`} key={colorId}>
+                        {colorName(colorId, palette)} unavailable: fixed neighbor {STATE_NAMES[neighbor]} already uses it.
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {displayedFixedError && (
+                  <p className="fixed-assignment-error" role="alert">{displayedFixedError}</p>
+                )}
+                {(selectedFixedColor || fixedStateCodes.length > 0) && (
+                  <div className="fixed-color-actions">
+                    {selectedFixedColor && (
+                      <button type="button" onClick={clearSelectedFixedState}>
+                        Clear {selectedState}
+                      </button>
+                    )}
+                    {fixedStateCodes.length > 0 && (
+                      <button type="button" onClick={clearAllFixedStates}>
+                        Clear all ({fixedStateCodes.length})
+                      </button>
+                    )}
+                  </div>
+                )}
+              </fieldset>
               <div className="guidance-actions">
                 <button
                   type="button"
@@ -831,7 +990,11 @@ export function MapColoringLab() {
                     currentState={snapshot.currentState}
                     affectedState={snapshot.affectedState}
                     selectedState={chosenState}
-                    onSelectState={setSelectedState}
+                    onSelectState={(state) => {
+                      setSelectedState(state);
+                      setFixedAssignmentError(null);
+                    }}
+                    fixedStates={fixedStateCodes}
                     forcedStates={event.type === "forced-assignment" && event.state ? [event.state] : []}
                     contradictedState={event.type === "contradiction" ? event.state ?? snapshot.affectedState : null}
                     neighbors={ADJACENCY}
@@ -855,16 +1018,26 @@ export function MapColoringLab() {
                 {visibleStates.map(([abbr, name]) => {
                   const assigned = snapshot?.assignments[abbr];
                   const domain = snapshot?.domains[abbr] ?? [];
+                  const fixedColor = fixedAssignments[abbr];
                   return (
                     <button
                       type="button"
                       key={abbr}
-                      onClick={() => setSelectedState(abbr)}
+                      onClick={() => {
+                        setSelectedState(abbr);
+                        setFixedAssignmentError(null);
+                      }}
                       aria-pressed={chosenState === abbr}
                     >
                       <strong>{abbr}</strong>
                       <span>{name}</span>
-                      <small>{assigned ? colorName(assigned, palette) : `${domain.length} options`}</small>
+                      <small>
+                        {fixedColor
+                          ? `Fixed ${colorName(fixedColor, palette)}`
+                          : assigned
+                            ? colorName(assigned, palette)
+                            : `${domain.length} options`}
+                      </small>
                     </button>
                   );
                 })}
@@ -879,7 +1052,13 @@ export function MapColoringLab() {
             <p className="event-number">{playbackStatus} · Event {cursor + 1} of {trace.length}</p>
             <div className="event-heading-row">
               <span className="event-icon" aria-hidden="true">
-                {event.type === "contradiction" || event.type === "limit-reached" ? "!" : event.type === "solved" ? "✓" : "→"}
+                {event.type === "contradiction" || event.type === "limit-reached"
+                  ? "!"
+                  : event.type === "solved"
+                    ? "✓"
+                    : event.type === "human-assignment"
+                      ? "H"
+                      : "→"}
               </span>
               <div>
                 <p className="kicker">What just happened</p>
@@ -888,6 +1067,11 @@ export function MapColoringLab() {
             </div>
             <p className="event-description">{teachingNarration(event, palette)}</p>
             {event.formal && event.type !== "limit-reached" && <code className="formal-note">{paletteText(event.formal, palette)}</code>}
+            {event.type === "human-assignment" && (
+              <p className="human-event-note" role="note">
+                Learner-fixed colors are applied before propagation and stay fixed through every backtrack.
+              </p>
+            )}
 
             {snapshot?.status === "solved" && (
               <div className="completion-note" role="status">
@@ -919,8 +1103,9 @@ export function MapColoringLab() {
               <p>
                 Explicit choices scan the visible map
                 <strong> {traversalDirection === "top-down" ? "from top to bottom" : "from bottom to top"}</strong>.
-                Propagation may assign states ahead of the scan. A human rethink request overrides
-                one choice, then the same deterministic scan resumes.
+                Human-fixed colors are applied before that scan and remain outside backtracking.
+                Propagation may assign more states ahead of the scan. A human rethink request
+                overrides one choice, then the same deterministic scan resumes.
               </p>
             </details>
           </section>
@@ -940,7 +1125,18 @@ export function MapColoringLab() {
                 <h3>{STATE_NAMES[chosenState] ?? chosenState}</h3>
                 <dl>
                   <div><dt>Assignment</dt><dd>{colorName(selectedAssignment, palette)}</dd></div>
-                  <div><dt>Options left</dt><dd>{selectedAssignment ? "Locked" : selectedDomain.length}</dd></div>
+                  <div>
+                    <dt>Human pin</dt>
+                    <dd>{chosenFixedColor ? colorName(chosenFixedColor, palette) : "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Options left</dt>
+                    <dd>
+                      {chosenFixedColor
+                        ? selectedAssignment === chosenFixedColor ? "Fixed" : "Pin applies next"
+                        : selectedAssignment ? "Locked" : selectedDomain.length}
+                    </dd>
+                  </div>
                 </dl>
                 <div>
                   <h4>Complete domain</h4>
@@ -971,6 +1167,7 @@ export function MapColoringLab() {
           <section className="legend-card" aria-labelledby="legend-heading">
             <h2 id="legend-heading">Map marks</h2>
             <ul>
+              <li><span className="legend-mark fixed">H</span> Fixed by you</li>
               <li><span className="legend-mark assigned">✓</span> Assigned</li>
               <li><span className="legend-mark current">◎</span> Current</li>
               <li><span className="legend-mark affected">→</span> Affected</li>

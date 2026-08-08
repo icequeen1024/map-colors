@@ -72,6 +72,7 @@ export interface USMapProps {
   currentState?: string | null;
   affectedState?: string | null;
   selectedState?: string | null;
+  fixedStates?: readonly string[];
   forcedStates?: readonly string[];
   contradictedState?: string | null;
   neighbors?: Readonly<Partial<Record<string, readonly string[] | undefined>>>;
@@ -166,6 +167,7 @@ export function USMap({
   currentState,
   affectedState,
   selectedState,
+  fixedStates = [],
   forcedStates = [],
   contradictedState,
   neighbors,
@@ -177,6 +179,7 @@ export function USMap({
   const normalizedAffected = normalizeCode(affectedState);
   const normalizedSelected = normalizeCode(selectedState);
   const normalizedContradiction = normalizeCode(contradictedState);
+  const normalizedFixed = new Set(fixedStates.map(normalizeCode));
   const normalizedForced = new Set(forcedStates.map(normalizeCode));
 
   const chooseState = (code: StateCode) => onSelectState?.(code);
@@ -218,6 +221,7 @@ export function USMap({
           const isSelected = code === normalizedSelected;
           const isCurrent = code === normalizedCurrent;
           const isAffected = code === normalizedAffected;
+          const isFixed = assignmentId !== null && normalizedFixed.has(code);
           const isForced = normalizedForced.has(code);
           const isContradicted = code === normalizedContradiction;
           const visibleColors = availableColors.slice(0, 3);
@@ -235,7 +239,9 @@ export function USMap({
                   : null;
           const domainNames = availableIds.map((id) => colorName(id, paletteById));
           const assignmentText = assignmentId
-            ? `Assigned ${colorName(assignmentId, paletteById)}`
+            ? isFixed
+              ? `Human-assigned and locked to ${colorName(assignmentId, paletteById)}`
+              : `Assigned ${colorName(assignmentId, paletteById)}`
             : "Unassigned";
           const domainText = `${availableIds.length} ${availableIds.length === 1 ? "color" : "colors"} available${domainNames.length ? `: ${domainNames.join(", ")}` : ": none"}`;
           const neighborText = stateNeighbors.length
@@ -249,6 +255,7 @@ export function USMap({
           const statusText = [
             isCurrent && "current search state",
             isAffected && "affected by propagation",
+            isFixed && "fixed by the learner",
             isForced && "forced assignment",
             isContradicted && "contradiction",
             isSelected && "selected",
@@ -281,6 +288,7 @@ export function USMap({
                 href={shapeHref}
                 style={{ fill: assignment?.hex ?? (assignmentId ? "#9a958c" : "#fbf8ef") }}
               />
+              {isFixed && <use className="usMap__outline usMap__outline--fixed" href={shapeHref} />}
               {isSelected && <use className="usMap__outline usMap__outline--selected" href={shapeHref} />}
               {isCurrent && <use className="usMap__outline usMap__outline--current" href={shapeHref} />}
               {isAffected && <use className="usMap__outline usMap__outline--affected" href={shapeHref} />}
@@ -297,9 +305,29 @@ export function USMap({
               <text className="usMap__stateCode" x={x} y={y + 3}>{code}</text>
 
               {assignmentId ? (
-                <g className="usMap__assignedMark" aria-hidden="true">
+                <g
+                  className={`usMap__assignedMark${isFixed ? " usMap__assignedMark--fixed" : ""}`}
+                  aria-hidden="true"
+                >
                   <circle cx={x} cy={y + 16} r="6.4" style={{ fill: assignment?.hex ?? "#9a958c" }} />
-                  <text x={x} y={y + 18.5}>✓</text>
+                  {isFixed ? (
+                    <>
+                      <path
+                        className="usMap__lockShackle"
+                        d={`M ${x - 2.6} ${y + 16}v-1.7a2.6 2.6 0 0 1 5.2 0v1.7`}
+                      />
+                      <rect
+                        className="usMap__lockBody"
+                        x={x - 3.8}
+                        y={y + 15.7}
+                        width="7.6"
+                        height="5.2"
+                        rx="1"
+                      />
+                    </>
+                  ) : (
+                    <text x={x} y={y + 18.5}>✓</text>
+                  )}
                 </g>
               ) : (
                 <g className="usMap__domain" aria-hidden="true">
@@ -336,7 +364,7 @@ export function USMap({
         })}
       </svg>
       <figcaption id="us-map-instructions" className="usMap__caption">
-        Select or focus a state to inspect it. Dots show its remaining color options; <strong>+N</strong> means more options are available in the inspector.
+        Select or focus a state to inspect it. Dots show its remaining color options; a lock marks a learner-fixed color, and <strong>+N</strong> means more options are available in the inspector.
       </figcaption>
     </figure>
   );

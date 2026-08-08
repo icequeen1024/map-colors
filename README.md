@@ -25,6 +25,7 @@ The 50-state graph includes Alaska and Hawaii as isolated states and omits the D
 - **Constraint propagation ON/OFF** resets and reruns the same deterministic search so its workload can be compared fairly.
 - **State order** switches between top-down and bottom-up map scans.
 - **Human guidance** lets a learner select an unassigned state and ask the solver to rethink it at the next explicit decision. The request changes one choice only, then the selected map order resumes.
+- **Assign a color** lets a learner fix a selected state to a palette color. Fixed states are visibly locked, respected by every search branch, and can be recolored, cleared individually, or cleared together. Colors that would conflict with a fixed neighbor are disabled.
 - **Palette controls** add or remove colors and regenerate the trace.
 - **Presets** provide quick ways to compare constrained and unconstrained searches.
 

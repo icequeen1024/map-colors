@@ -103,6 +103,154 @@ test("learner guidance replaces one decision and deterministic scanning resumes"
   assert.match(unavailable.event.narration, /already assigned/i);
 });
 
+test("human-fixed colors are narrated deterministically and reduce exact outcome volume", () => {
+  const trace = generateTrace(FOUR_COLORS, {
+    fixedAssignments: { TX: "gold", AL: "coral" },
+  });
+  const humanAssignments = trace.filter(
+    (snapshot) => snapshot.event.type === "human-assignment",
+  );
+
+  assert.deepEqual(
+    humanAssignments.map((snapshot) => snapshot.event.state),
+    ["AL", "TX"],
+  );
+  assert.deepEqual(trace[0].assignments, {});
+  assert.equal(
+    humanAssignments[0].outcomes.remaining,
+    (BigInt(4) ** BigInt(49)).toString(),
+  );
+  assert.equal(
+    humanAssignments[1].outcomes.remaining,
+    (BigInt(4) ** BigInt(48)).toString(),
+  );
+  assert.equal(humanAssignments[0].assignments.AL, "coral");
+  assert.equal(humanAssignments[1].assignments.TX, "gold");
+  assert.equal(humanAssignments[0].metrics.assignments, 1);
+  assert.equal(humanAssignments[1].metrics.assignments, 2);
+  assert.deepEqual(humanAssignments[0].event.previousDomain, FOUR_COLORS);
+  assert.deepEqual(humanAssignments[0].event.nextDomain, ["coral"]);
+  assert.match(humanAssignments[0].event.narration, /preserve this choice/i);
+
+  const afterPins = trace.slice(trace.indexOf(humanAssignments[1]));
+  for (const snapshot of afterPins) {
+    assert.equal(snapshot.assignments.AL, "coral");
+    assert.equal(snapshot.assignments.TX, "gold");
+    assert.ok(snapshot.stack.every((frame) => frame.state !== "AL" && frame.state !== "TX"));
+    assert.ok(
+      snapshot.searchTree.every(
+        (decision) => decision.state !== "AL" && decision.state !== "TX",
+      ),
+    );
+  }
+  assert.equal(trace.at(-1)?.status, "solved");
+
+  const samePinsDifferentObjectOrder = generateTrace(FOUR_COLORS, {
+    fixedAssignments: { AL: "coral", TX: "gold" },
+  });
+  assert.deepEqual(trace, samePinsDifferentObjectOrder);
+
+  const bottomUpPins = generateTrace(FOUR_COLORS, {
+    fixedAssignments: { AL: "coral", TX: "gold" },
+    traversalDirection: "bottom-up",
+  }).filter((snapshot) => snapshot.event.type === "human-assignment");
+  assert.deepEqual(
+    bottomUpPins.map((snapshot) => snapshot.event.state),
+    ["TX", "AL"],
+  );
+});
+
+test("backtracking never changes or adds a fixed state to the decision stack", () => {
+  const trace = generateTrace(["red", "blue", "gold"], {
+    fixedAssignments: { AL: "red" },
+  });
+  const humanIndex = trace.findIndex(
+    (snapshot) => snapshot.event.type === "human-assignment",
+  );
+
+  assert.ok(trace.some((snapshot) => snapshot.event.type === "backtrack"));
+  for (const snapshot of trace.slice(humanIndex)) {
+    assert.equal(snapshot.assignments.AL, "red");
+    assert.ok(snapshot.stack.every((frame) => frame.state !== "AL"));
+  }
+});
+
+test("fixed colors seed propagation only when propagation is enabled", () => {
+  const withPropagation = generateTrace(FOUR_COLORS, {
+    fixedAssignments: { AL: "coral" },
+  });
+  const withoutPropagation = generateTrace(FOUR_COLORS, {
+    fixedAssignments: { AL: "coral" },
+    propagationEnabled: false,
+  });
+  const humanEventIndex = withPropagation.findIndex(
+    (snapshot) => snapshot.event.type === "human-assignment",
+  );
+  const firstSelectionIndex = withPropagation.findIndex(
+    (snapshot) => snapshot.event.type === "select-variable",
+  );
+  const pinReductionIndex = withPropagation.findIndex(
+    (snapshot) =>
+      snapshot.event.type === "remove-color" &&
+      snapshot.event.causeState === "AL",
+  );
+
+  assert.ok(pinReductionIndex > humanEventIndex);
+  assert.ok(pinReductionIndex < firstSelectionIndex);
+  assert.ok(
+    !withoutPropagation.some(
+      (snapshot) => snapshot.event.type === "remove-color",
+    ),
+  );
+  assert.equal(withoutPropagation.at(-1)?.assignments.AL, "coral");
+});
+
+test("fixed-assignment validation rejects unknown colors, states, and direct conflicts", () => {
+  assert.throws(
+    () =>
+      generateTrace(FOUR_COLORS, {
+        fixedAssignments: { AL: "violet" },
+      }),
+    /outside the palette/i,
+  );
+  assert.throws(
+    () =>
+      generateTrace(FOUR_COLORS, {
+        fixedAssignments: { ZZ: "coral" } as unknown as Partial<
+          Record<StateCode, string>
+        >,
+      }),
+    /unknown fixed-assignment state/i,
+  );
+  assert.throws(
+    () =>
+      generateTrace(FOUR_COLORS, {
+        fixedAssignments: { AL: "coral", FL: "coral" },
+      }),
+    /fixed assignments conflict.*Alabama.*Florida/i,
+  );
+});
+
+test("a contradiction propagated from a fixed color terminates without backtracking", () => {
+  const trace = generateTrace(["red"], {
+    fixedAssignments: { AL: "red" },
+  });
+  const humanIndex = trace.findIndex(
+    (snapshot) => snapshot.event.type === "human-assignment",
+  );
+
+  assert.equal(trace[humanIndex].outcomes.remaining, "1");
+  assert.equal(trace.at(-1)?.status, "unsatisfiable");
+  assert.equal(trace.at(-1)?.outcomes.remaining, "0");
+  assert.ok(
+    !trace.some(
+      (snapshot) =>
+        snapshot.event.type === "select-variable" ||
+        snapshot.event.type === "backtrack",
+    ),
+  );
+});
+
 test("four colors produce a complete coloring with no adjacent conflicts", () => {
   const trace = generateTrace(FOUR_COLORS);
   const final = trace.at(-1);

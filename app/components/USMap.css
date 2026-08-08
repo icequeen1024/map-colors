@@ -72,6 +72,12 @@
   stroke-dasharray: 10 4;
 }
 
+.usMap__outline--fixed {
+  stroke: #176142;
+  stroke-width: 7;
+  stroke-dasharray: 12 3;
+}
+
 .usMap__outline--current {
   stroke: #673ab7;
   stroke-width: 4;
@@ -160,6 +166,24 @@
   font-size: 8px;
   font-weight: 950;
   text-anchor: middle;
+}
+
+.usMap__assignedMark--fixed circle {
+  stroke: #176142;
+  stroke-width: 2;
+}
+
+.usMap__lockShackle {
+  fill: none;
+  stroke: #191613;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+
+.usMap__lockBody {
+  fill: #fffdf7;
+  stroke: #191613;
+  stroke-width: 0.8;
 }
 
 .usMap__overflow {
