@@ -39,6 +39,7 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /log scale/);
   assert.match(html, /Propagation<\/span><strong>ON<\/strong><small>Ready/);
   assert.match(html, /Constraint propagation/);
+  assert.match(html, /Branching search history/);
   assert.match(html, /DFS tree/);
   assert.match(html, /rejected \/ pruned/);
   assert.match(
@@ -54,12 +55,14 @@ test("statically renders the complete teaching interface", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("ships the licensed 50-state map and removes starter-only UI", async () => {
-  const [page, layout, packageJson, mapAsset] = await Promise.all([
+test("ships the licensed map and a bounded auto-following branching tree", async () => {
+  const [page, layout, packageJson, mapAsset, labSource, labStyles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../public/map/us-states.svg", import.meta.url), "utf8"),
+    readFile(new URL("../app/MapColoringLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/map-coloring-lab.css", import.meta.url), "utf8"),
   ]);
 
   const stateIds = [...mapAsset.matchAll(/<path\s+id="([A-Z]{2})"/g)].map(
@@ -73,6 +76,20 @@ test("ships the licensed 50-state map and removes starter-only UI", async () => 
   assert.match(layout, /export const metadata/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(labSource, /className="tree-branches"/);
+  assert.match(labSource, /className="tree-child-decisions"/);
+  assert.match(labSource, /viewport\.scrollTop = Math\.max/);
+  assert.match(labSource, /viewport\.scrollLeft = Math\.max/);
+  assert.match(
+    labStyles,
+    /\.dfs-tree-viewport\s*{[^}]*height:\s*390px;[^}]*overflow:\s*auto;/s,
+  );
+  assert.match(
+    labStyles,
+    /\.map-learning-stage\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(labStyles, /\.tree-branches::before/);
+  assert.match(labStyles, /\.tree-child-decisions::before/);
 
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
 });

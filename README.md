@@ -1,6 +1,6 @@
 # Map Colors
 
-Map Colors is an interactive lesson about constraint propagation and depth-first search. It turns the U.S. map-coloring problem into a step-by-step visual trace: each state exposes its remaining color domain, assignments propagate to neighboring states, contradictions are explained, and abandoned branches remain visible in the DFS tree beside the map.
+Map Colors is an interactive lesson about constraint propagation and depth-first search. It turns the U.S. map-coloring problem into a step-by-step visual trace: each state exposes its remaining color domain, assignments propagate to neighboring states, contradictions are explained, and abandoned branches remain visible in the DFS tree below the map.
 
 The product behavior and acceptance criteria live in [SPEC.md](./SPEC.md).
 
@@ -26,7 +26,7 @@ The 50-state graph includes Alaska and Hawaii as isolated states and omits the D
 - **Palette controls** add or remove colors and regenerate the trace.
 - **Presets** provide quick ways to compare constrained and unconstrained searches.
 
-The map and a dense, 50-state-capable DFS view stay adjacent on desktop and tablet screens, stacking only on small/mobile layouts, and remain synchronized with the current snapshot. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible. Select any state to inspect its assignment, complete domain, and neighbors in an optional details sidebar; the sidebar is collapsed by default so the map-and-tree area can expand. Rejected and constraint-pruned color branches remain visible with crossed-out labels.
+An actual branching, 50-state-capable DFS tree sits directly below the map and remains synchronized with the current snapshot. It connects each decision to its separate color options and descendant decisions inside a limited-height, two-directional scroll pane that automatically follows the active branch. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible. Select any state to inspect its assignment, complete domain, and neighbors in an optional details sidebar; the sidebar is collapsed by default so the map-and-tree area can expand. Rejected and constraint-pruned color branches remain visible with crossed-out labels.
 
 ## Remaining search space
 

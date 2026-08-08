@@ -63,9 +63,9 @@ The primary viewport should prioritize the map, not generic dashboard chrome.
 - The state being tried, affected neighbors, forced states, and contradicted state use distinct, redundant treatments (color plus outline/icon/label), not color alone.
 - Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver.
 - Hover/focus reveals the state name, assigned value, full domain, and land-border neighbors.
-- A dense depth-first-search tree sits directly beside the map on wide and medium/tablet screens, stacking immediately below it only on true small/mobile screens. It must comfortably represent a full 50-state decision path without forcing the learner to switch views. The map and tree advance from the same trace snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
+- An actual branching depth-first-search tree sits directly below the map at every viewport width. Decision nodes connect to separate color-option branches and then to their descendant decisions, so the structure cannot collapse into a flat path ledger. The tree lives in a limited-height pane that scrolls in both directions and automatically follows the deepest active branch as the trace advances. The map and tree advance from the same snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
 - Each tree decision shows its color candidates in palette order. Tried candidates retain their outcome; rejected or pruned candidates are visibly crossed out with a text/icon cue, and the active candidate is highlighted without relying on color alone.
-- The tree may compact or window older abandoned branches to remain readable, but it must preserve every level of the active root-to-leaf path, clearly indicate its current depth out of 50, and retain the most recent abandoned branch.
+- The tree may window older abandoned branches to control memory, but it must preserve every level of the active root-to-leaf path, clearly indicate its current depth out of 50, retain the most recent abandoned branch, and keep parent/child connectors visible.
 
 ### 5.3 Control bar
 
@@ -119,7 +119,7 @@ Rich explanation and inspection tools live in a sidebar that is collapsed by def
 ## 6. Visual direction
 
 - Feel like an excellent classroom whiteboard refined into a modern interactive: warm paper background, ink-like text, crisp dark state boundaries, and vivid domain tokens.
-- Use a responsive main canvas with the map and dense DFS tree adjacent. A default-collapsed details sidebar supplies explanation, history, and inspection without permanently shrinking the teaching canvas; the main area expands when it is closed.
+- Use a responsive main canvas with the map dominant and the branching DFS tree in a bounded scroll pane directly beneath it. A default-collapsed details sidebar supplies explanation, history, and inspection without permanently shrinking the teaching canvas; the main area expands when it is closed.
 - Use restrained motion: a short pulse travels from the assigned state to the neighbor, then the eliminated dot exits. Backtracking reverses/dims the abandoned decision. Motion communicates causality rather than decoration.
 - Honor `prefers-reduced-motion` by removing travel and exit animation while preserving immediate state changes and narration.
 - Do not rely on gradients, stock dashboard styling, or decorative imagery.
@@ -136,9 +136,9 @@ Rich explanation and inspection tools live in a sidebar that is collapsed by def
 
 ## 8. Responsive behavior
 
-- **Wide (≥ 1100 px):** map and dense DFS tree share the expanded main canvas; the optional details sidebar opens alongside them and is collapsed by default.
-- **Medium (700–1099 px):** map and dense DFS tree remain side by side in the main canvas, with proportions adjusted for the narrower viewport; details open as an inline disclosure that does not obscure either view.
-- **Small (< 700 px):** one column; the compact monitor and playback controls remain sticky; the map is horizontally contained without requiring page-level horizontal scrolling; a searchable state list provides an accessible alternative for tiny shapes; optional details expand inline.
+- **Wide (≥ 1100 px):** the map uses the expanded main canvas; the bounded DFS tree pane spans the same width immediately below it. The optional details sidebar opens alongside the canvas and is collapsed by default.
+- **Medium (700–1099 px):** the map remains full width with the bounded DFS tree immediately below it; details open as an inline disclosure that does not obscure either view.
+- **Small (< 700 px):** one column; the compact monitor and playback controls remain sticky; the map is horizontally contained without page-level horizontal scrolling; the tree pane becomes shorter but remains independently scrollable and follows the active branch; a searchable state list provides an accessible alternative for tiny shapes; optional details expand inline.
 
 ## 9. State and persistence
 
@@ -166,13 +166,13 @@ The first version is complete when:
 2. Run, Pause, Step, Back, Reset, and speed controls behave consistently.
 3. Every state visibly communicates remaining options, with the complete domain available through focus/click inspection.
 4. Each propagation event identifies its cause and resulting domain change in plain language.
-5. The dense depth-first tree and backtracking are visible, synchronized with the map, and capable of showing all 50 levels of the active decision path.
+5. The actual branching depth-first tree and backtracking are visible below the map, synchronized with it, and capable of reaching all 50 levels through an auto-following limited-height scroll pane.
 6. The 50-state constraint graph is valid and symmetric; solved runs contain no same-colored adjacent states, and any tentative adjacent-color conflict is contradicted before another assignment event.
 7. The page clearly distinguishes solved, contradiction, backtracking, and unsatisfiable states.
 8. The experience works with keyboard-only navigation, reduced motion, and small screens.
 9. Automated tests and the production build pass.
 10. Starter copy, starter preview code, and unused starter-only dependencies are removed; repository documentation describes the finished product and its commands.
-11. The DFS tree is adjacent to the map at wide widths, remains synchronized with playback, and crosses out rejected/pruned color candidates.
+11. The DFS tree is directly below the map, visibly connects decisions to color branches and descendants, auto-scrolls to the active branch, and crosses out rejected/pruned candidates.
 12. A learner can switch constraint propagation on/off and compare the same exact remaining-search-space metric, which starts at `k^50`, never increases, and does not decrease merely because a branch is tried.
 13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
 14. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible while the default-collapsed details sidebar allows the main map-and-tree area to expand.

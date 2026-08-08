@@ -167,28 +167,111 @@ function DFSTree({
   decisions: readonly SearchTreeDecision[];
   palette: readonly PaletteColor[];
 }) {
-  const treeRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const tree = treeRef.current;
-    const liveRows = tree?.querySelectorAll<HTMLElement>(
-      ".tree-row.is-live, .tree-row.is-solution",
-    );
-    const activeOption = liveRows?.[liveRows.length - 1];
-    if (!tree || !activeOption) return;
-    const treeBounds = tree.getBoundingClientRect();
-    const optionBounds = activeOption.getBoundingClientRect();
-    if (optionBounds.top < treeBounds.top || optionBounds.bottom > treeBounds.bottom) {
-      tree.scrollTop += optionBounds.top - treeBounds.top - tree.clientHeight / 3;
+  const treeRef = useRef<HTMLDivElement>(null);
+  const latestDecisionId = decisions.at(-1)?.id;
+  const { roots, childrenByBranch } = useMemo(() => {
+    const children = new Map<string, SearchTreeDecision[]>();
+    for (const decision of decisions) {
+      if (!decision.parentBranchId) continue;
+      const branchChildren = children.get(decision.parentBranchId) ?? [];
+      branchChildren.push(decision);
+      children.set(decision.parentBranchId, branchChildren);
     }
+
+    return {
+      roots: decisions.filter((decision) => !decision.parentBranchId),
+      childrenByBranch: children,
+    };
   }, [decisions]);
 
+  useEffect(() => {
+    const viewport = treeRef.current;
+    if (!viewport) return;
+    const liveBranches = viewport.querySelectorAll<HTMLElement>(
+      ".tree-branch-node.tree-option--active, .tree-branch-node.tree-option--solution",
+    );
+    const activeBranch = liveBranches[liveBranches.length - 1];
+    const latestDecision = latestDecisionId
+      ? viewport.querySelector<HTMLElement>(`[data-decision-id="${latestDecisionId}"]`)
+      : null;
+    const focusNode = activeBranch ?? latestDecision;
+    if (!focusNode) return;
+
+    const viewportBounds = viewport.getBoundingClientRect();
+    const focusBounds = focusNode.getBoundingClientRect();
+    const targetTop =
+      viewport.scrollTop +
+      focusBounds.top -
+      viewportBounds.top -
+      Math.max(18, (viewport.clientHeight - focusBounds.height) * 0.58);
+    const targetLeft =
+      viewport.scrollLeft +
+      focusBounds.left -
+      viewportBounds.left -
+      Math.max(18, (viewport.clientWidth - focusBounds.width) / 2);
+
+    viewport.scrollTop = Math.max(0, targetTop);
+    viewport.scrollLeft = Math.max(0, targetLeft);
+  }, [decisions, latestDecisionId]);
+
+  function renderDecision(decision: SearchTreeDecision) {
+    const active = decision.options.some((option) => option.status === "active");
+    const solution = decision.options.some((option) => option.status === "solution");
+    const exhausted = decision.options.every(
+      (option) => option.status === "pruned" || option.status === "rejected",
+    );
+
+    return (
+      <li
+        className={`tree-decision${active ? " is-live" : ""}${solution ? " is-solution" : ""}${exhausted ? " is-exhausted" : ""}`}
+        key={decision.id}
+      >
+        <div className="tree-decision-node" data-decision-id={decision.id}>
+          <span>Depth {decision.depth}</span>
+          <strong>{decision.state}</strong>
+          <small>{STATE_NAMES[decision.state]}</small>
+        </div>
+        <ol className="tree-branches" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
+          {decision.options.map((option) => {
+            const color = palette.find((item) => item.id === option.colorId);
+            const statusLabel = optionStatusLabel(option);
+            const optionChildren = option.branchId
+              ? childrenByBranch.get(option.branchId) ?? []
+              : [];
+
+            return (
+              <li className="tree-branch" key={option.colorId}>
+                <div
+                  className={`tree-branch-node tree-option--${option.status}`}
+                  aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                  title={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                >
+                  <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
+                    {color?.symbol ?? "?"}
+                  </i>
+                  <span>{color?.name ?? option.colorId}</span>
+                  <b aria-hidden="true">{optionMark(option.status)}</b>
+                  <small>{statusLabel}</small>
+                </div>
+                {optionChildren.length > 0 && (
+                  <ol className="tree-child-decisions">
+                    {optionChildren.map(renderDecision)}
+                  </ol>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </li>
+    );
+  }
+
   return (
-    <section className="dfs-tree" aria-labelledby="tree-heading" ref={treeRef}>
+    <section className="dfs-tree" aria-labelledby="tree-heading">
       <div className="dfs-tree-top">
         <div className="dfs-tree-heading">
           <div>
-            <p className="kicker">Dense branch view</p>
+            <p className="kicker">Branching search history</p>
             <h3 id="tree-heading">DFS tree</h3>
           </div>
           <span>{decisions.length} visible nodes</span>
@@ -198,53 +281,17 @@ function DFSTree({
           <span><b className="tree-key-cut">×</b> rejected / pruned</span>
         </div>
       </div>
-      {decisions.length > 0 ? (
-        <ol className="tree-rows">
-          {decisions.map((decision) => {
-            const active = decision.options.some((option) => option.status === "active");
-            const solution = decision.options.some((option) => option.status === "solution");
-            const exhausted = decision.options.every(
-              (option) => option.status === "pruned" || option.status === "rejected",
-            );
-            const indent = Math.min(Math.max(decision.depth - 1, 0), 8) * 7;
-            return (
-              <li
-                className={`tree-row${active ? " is-live" : ""}${solution ? " is-solution" : ""}${exhausted ? " is-exhausted" : ""}`}
-                key={decision.id}
-                style={{ "--tree-indent": `${indent}px` } as React.CSSProperties}
-              >
-                <div className="tree-row-line">
-                  <span className="tree-depth">{decision.depth}</span>
-                  <strong title={STATE_NAMES[decision.state]}>{decision.state}</strong>
-                  <span className="tree-branch-line" aria-hidden="true" />
-                  <div className="tree-mini-options" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
-                    {decision.options.map((option) => {
-                      const color = palette.find((item) => item.id === option.colorId);
-                      const statusLabel = optionStatusLabel(option);
-                      return (
-                        <span
-                          className={`tree-mini-option tree-option--${option.status}`}
-                          key={option.colorId}
-                          aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
-                          title={`${color?.name ?? option.colorId}: ${statusLabel}`}
-                        >
-                          <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
-                            {color?.symbol ?? "?"}
-                          </i>
-                          <b aria-hidden="true">{optionMark(option.status)}</b>
-                        </span>
-                      );
-                    })}
-                  </div>
-                  <small>{solution ? "solution" : active ? "active" : exhausted ? "closed" : "open"}</small>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      ) : (
-        <p className="tree-empty">Press Step to reveal the first decision and its color branches.</p>
-      )}
+      <div className="dfs-tree-viewport" ref={treeRef}>
+        {roots.length > 0 ? (
+          <div className="tree-canvas">
+            <ol className="tree-roots" aria-label="Depth-first search branches">
+              {roots.map(renderDecision)}
+            </ol>
+          </div>
+        ) : (
+          <p className="tree-empty">Press Step to reveal the first decision and its color branches.</p>
+        )}
+      </div>
     </section>
   );
 }
