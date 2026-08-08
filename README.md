@@ -26,7 +26,13 @@ The 50-state graph includes Alaska and Hawaii as isolated states and omits the D
 - **Palette controls** add or remove colors and regenerate the trace.
 - **Presets** provide quick ways to compare constrained and unconstrained searches.
 
-Select any state on the map to inspect its assignment, complete domain, and neighbors. The explanation, event history, exact color-attempts-remaining count, and DFS tree stay synchronized with the current snapshot. Rejected and constraint-pruned color branches remain visible with crossed-out labels.
+The map and a dense, 50-state-capable DFS view stay adjacent on desktop and tablet screens, stacking only on small/mobile layouts, and remain synchronized with the current snapshot. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible. Select any state to inspect its assignment, complete domain, and neighbors in an optional details sidebar; the sidebar is collapsed by default so the map-and-tree area can expand. Rejected and constraint-pruned color branches remain visible with crossed-out labels.
+
+## Remaining search space
+
+This teaching metric is the exact number of complete color assignments to all 50 states that have not yet been eliminated. With `k` colors, a fresh run begins at `k^50`. The value can only stay level or decrease: domain reductions remove every complete assignment that depends on the removed option, and contradictions remove the remaining outcome volume beneath that branch. Merely trying a DFS branch does not eliminate its untried siblings.
+
+Remaining search space is not a future-event count, runtime estimate, percentage complete, or count of valid solutions. Large values are summarized in scientific notation while the exact grouped integer remains available visually and to assistive technology. A solver-attempt cap may stop an intentionally expensive run to keep the browser responsive, but that cap is only an execution safeguard and never defines the workload metric.
 
 ## Local development
 

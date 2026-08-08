@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   ADJACENCY,
-  REMAINING_WORK_DEFINITION,
   STATE_CODES,
   STATE_NAMES,
   generateTrace,
@@ -106,6 +105,53 @@ test("trace exposes domain reductions and singleton propagation as separate even
   assert.equal(forced.assignments[forced.event.state as StateCode], forced.event.colorId);
 });
 
+test("non-contradiction snapshots never contain equal-colored neighbors", () => {
+  for (const propagationEnabled of [true, false]) {
+    const trace = generateTrace(FOUR_COLORS, { propagationEnabled });
+    for (const snapshot of trace) {
+      if (snapshot.event.type === "contradiction") continue;
+      for (const state of STATE_CODES) {
+        const color = snapshot.assignments[state];
+        if (color === undefined) continue;
+        for (const neighbor of ADJACENCY[state]) {
+          assert.notEqual(
+            color,
+            snapshot.assignments[neighbor],
+            `${state}/${neighbor} conflict leaked into ${snapshot.event.type}`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("a forced singleton that conflicts is rejected immediately", () => {
+  const trace = generateTrace(["red", "blue", "gold"]);
+  const contradictionIndex = trace.findIndex(
+    (snapshot, index) =>
+      index > 0 &&
+      snapshot.event.type === "contradiction" &&
+      snapshot.event.state === "OH" &&
+      snapshot.event.causeState === "IN" &&
+      trace[index - 1].event.type === "remove-color" &&
+      trace[index - 1].event.state === "OH" &&
+      trace[index - 1].event.nextDomain?.length === 1,
+  );
+
+  assert.ok(contradictionIndex > 0, "expected the IN/OH forced-color conflict");
+  const before = trace[contradictionIndex - 1];
+  const contradiction = trace[contradictionIndex];
+  assert.equal(before.event.type, "remove-color");
+  assert.equal(contradiction.event.type, "contradiction");
+  assert.equal(contradiction.assignments.OH, undefined);
+  assert.equal(contradiction.assignments.IN, contradiction.event.colorId);
+  assert.ok(
+    BigInt(contradiction.outcomes.remaining) <
+      BigInt(before.outcomes.remaining),
+    "the rejected active branch must be eliminated exactly when detected",
+  );
+});
+
 test("search-tree decisions expose pruned, rejected, and solution color branches", () => {
   const solvedTrace = generateTrace(FOUR_COLORS);
   const prunedSnapshot = solvedTrace.find((snapshot) =>
@@ -145,16 +191,84 @@ test("search-tree decisions expose pruned, rejected, and solution color branches
   );
 });
 
-test("remaining work exactly counts future color-attempt events", () => {
+test("outcome space starts at 4^50 and only shrinks as outcomes are disproved", () => {
+  const trace = generateTrace(FOUR_COLORS);
+  const expectedTotal = BigInt(4) ** BigInt(50);
+  const expectedFirstReduction = BigInt(4) ** BigInt(47);
+  const firstReduction = trace.find(
+    (snapshot) => snapshot.event.type === "remove-color",
+  )!;
+
+  assert.deepEqual(trace[0].outcomes, {
+    total: expectedTotal.toString(),
+    remaining: expectedTotal.toString(),
+    eliminated: "0",
+  });
+  assert.equal(
+    firstReduction.outcomes.eliminated,
+    expectedFirstReduction.toString(),
+  );
+
+  let previousRemaining = expectedTotal;
+  for (let index = 0; index < trace.length; index += 1) {
+    const snapshot = trace[index];
+    const total = BigInt(snapshot.outcomes.total);
+    const remaining = BigInt(snapshot.outcomes.remaining);
+    const eliminated = BigInt(snapshot.outcomes.eliminated);
+
+    assert.equal(total, expectedTotal);
+    assert.ok(remaining <= previousRemaining, `outcomes increased at event ${index}`);
+    assert.equal(eliminated, total - remaining);
+    if (snapshot.event.type === "try-color") {
+      assert.equal(
+        remaining,
+        BigInt(trace[index - 1].outcomes.remaining),
+        "trying a branch must not eliminate its unvisited siblings",
+      );
+    }
+    previousRemaining = remaining;
+  }
+
+  assert.ok(
+    BigInt(trace.at(-1)!.outcomes.remaining) > BigInt(0),
+    "stopping at the first solution leaves other outcomes not yet disproved",
+  );
+});
+
+test("propagation eliminates outcome volume earlier than direct checking", () => {
+  const withPropagation = generateTrace(FOUR_COLORS);
+  const withoutPropagation = generateTrace(FOUR_COLORS, {
+    propagationEnabled: false,
+  });
+  const firstShrinkWithPropagation = withPropagation.findIndex(
+    (snapshot) => snapshot.outcomes.eliminated !== "0",
+  );
+  const firstShrinkWithoutPropagation = withoutPropagation.findIndex(
+    (snapshot) => snapshot.outcomes.eliminated !== "0",
+  );
+
+  assert.ok(firstShrinkWithPropagation >= 0);
+  assert.ok(firstShrinkWithoutPropagation >= 0);
+  assert.ok(firstShrinkWithPropagation < firstShrinkWithoutPropagation);
+  assert.equal(
+    withPropagation[firstShrinkWithPropagation].event.type,
+    "remove-color",
+  );
+  assert.equal(
+    withoutPropagation[firstShrinkWithoutPropagation].event.type,
+    "contradiction",
+  );
+  assert.ok(
+    BigInt(withPropagation[firstShrinkWithPropagation].outcomes.eliminated) >
+      BigInt(0),
+  );
+});
+
+test("deprecated attempt counters remain internally consistent", () => {
   const trace = generateTrace(FOUR_COLORS);
   const total = trace.at(-1)!.metrics.totalColorAttempts;
 
-  assert.match(REMAINING_WORK_DEFINITION, /Future try-color events/i);
-  assert.equal(trace[0].metrics.colorAttempts, 0);
-  assert.equal(trace[0].metrics.remainingColorAttempts, total);
-  assert.equal(trace.at(-1)!.metrics.remainingColorAttempts, 0);
   for (const snapshot of trace) {
-    assert.equal(snapshot.metrics.totalColorAttempts, total);
     assert.equal(
       snapshot.metrics.remainingColorAttempts,
       total - snapshot.metrics.colorAttempts,
@@ -211,6 +325,11 @@ test("pathological propagation-off search ends honestly at its attempt limit", (
   assert.equal(final.metrics.remainingColorAttempts, 0);
   assert.equal(final.metrics.runTerminatedByLimit, true);
   assert.equal(trace[0].metrics.remainingColorAttempts, 20);
+  assert.ok(BigInt(final.outcomes.remaining) > BigInt(0));
+  assert.equal(
+    BigInt(final.outcomes.eliminated),
+    BigInt(final.outcomes.total) - BigInt(final.outcomes.remaining),
+  );
   assert.ok(
     Object.keys(final.assignments).length > 0,
     "the capped terminal snapshot should preserve the branch being inspected",
@@ -223,6 +342,11 @@ test("small palettes record contradictions, backtracking, and unsatisfiability",
     const trace = generateTrace(palette);
     assert.equal(trace.at(-1)?.status, "unsatisfiable");
     assert.equal(trace.at(-1)?.event.type, "unsatisfiable");
+    assert.equal(trace.at(-1)?.outcomes.remaining, "0");
+    assert.equal(
+      trace.at(-1)?.outcomes.eliminated,
+      trace.at(-1)?.outcomes.total,
+    );
     const contradiction = trace.find(
       (snapshot) => snapshot.event.type === "contradiction",
     );
@@ -261,6 +385,7 @@ test("snapshots are immutable and palette validation rejects ambiguous ids", () 
   assert.ok(Object.isFrozen(snapshot.searchTree[0]));
   assert.ok(Object.isFrozen(snapshot.searchTree[0].options));
   assert.ok(Object.isFrozen(snapshot.metrics));
+  assert.ok(Object.isFrozen(snapshot.outcomes));
   assert.throws(() => generateTrace(["red", "red"]), /unique/i);
   assert.throws(() => generateTrace([""]), /non-empty/i);
   assert.throws(() => generateTrace(["red"], { maxSnapshots: 1 }), /at least 2/i);

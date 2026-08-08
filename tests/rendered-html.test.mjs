@@ -29,16 +29,21 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /Available colors/);
   assert.match(html, /Run/);
   assert.match(html, /Step/);
-  assert.match(html, /State inspector/);
-  assert.match(html, /Decision stack/);
-  assert.match(html, /Color attempts remaining/);
-  assert.match(html, /Propagation <!-- -->ON/);
+  assert.match(html, /Open details/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /Outcomes not yet eliminated · start <!-- -->4<!-- -->\^50/);
+  assert.match(html, /1\.267 × 10\^30/);
+  assert.match(html, /1,267,650,600,228,229,401,496,703,205,376/);
+  assert.match(html, /Exact count/);
+  assert.match(html, /Magnitude remaining/);
+  assert.match(html, /log scale/);
+  assert.match(html, /Propagation<\/span><strong>ON<\/strong><small>Ready/);
   assert.match(html, /Constraint propagation/);
   assert.match(html, /DFS tree/);
   assert.match(html, /rejected \/ pruned/);
   assert.match(
     html,
-    /aria-label="[^"]*color attempts remaining with constraint propagation on"/i,
+    /aria-label="[^"]*complete outcomes remaining with constraint propagation on"/i,
   );
   assert.match(html, /aria-pressed="true"/);
   assert.match(html, /Interactive map of the 50 United States/);

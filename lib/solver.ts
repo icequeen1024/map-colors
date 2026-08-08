@@ -85,11 +85,11 @@ export interface SolverMetrics {
   readonly assignments: number;
   /** Backwards-compatible name for colorAttempts. */
   readonly decisions: number;
-  /** Color-attempt (`try-color`) events through this snapshot. */
+  /** DFS color choices examined through this snapshot. */
   readonly colorAttempts: number;
-  /** Exact color-attempt events in this completed generated run. */
+  /** Exact DFS color choices examined in this completed generated run. */
   readonly totalColorAttempts: number;
-  /** Exact future color-attempt events after this snapshot. */
+  /** @deprecated Use `snapshot.outcomes.remaining` for teaching remaining work. */
   readonly remainingColorAttempts: number;
   readonly domainReductions: number;
   /** Concise UI alias for domainReductions. */
@@ -107,6 +107,16 @@ export interface SolverMetrics {
   readonly runTerminatedByLimit: boolean;
 }
 
+/** Exact counts of complete assignments in the original palette search space. */
+export interface OutcomeSpaceMetrics {
+  /** `paletteSize ^ 50`, expressed as a base-10 BigInt string. */
+  readonly total: string;
+  /** Original complete assignments not yet disproved at this event. */
+  readonly remaining: string;
+  /** Disproved original complete assignments (`total - remaining`). */
+  readonly eliminated: string;
+}
+
 export interface TraceSnapshot {
   readonly index: number;
   readonly status: SolverStatus;
@@ -117,6 +127,7 @@ export interface TraceSnapshot {
   readonly searchTree: readonly SearchTreeDecision[];
   readonly propagationEnabled: boolean;
   readonly metrics: SolverMetrics;
+  readonly outcomes: OutcomeSpaceMetrics;
   readonly currentState?: StateCode;
   readonly affectedState?: StateCode;
 }
@@ -137,9 +148,9 @@ export interface GenerateTraceOptions {
   readonly maxColorAttempts?: number;
 }
 
-/** Definition used by `remainingColorAttempts` and comparison UI. */
+/** @deprecated Outcome-space comparison uses `snapshot.outcomes` instead. */
 export const REMAINING_WORK_DEFINITION =
-  "Future try-color events after this snapshot in the completed deterministic generated run.";
+  "Deprecated: future DFS color choices examined after this snapshot in the generated run.";
 
 interface WorkingState {
   assignments: Partial<Record<StateCode, string>>;
@@ -202,12 +213,24 @@ function makeInitialState(colorIds: readonly string[]): WorkingState {
   return { assignments: {}, domains };
 }
 
+function activeBranchVolume(state: WorkingState): bigint {
+  let volume = BigInt(1);
+  for (const code of STATE_CODES) {
+    if (state.assignments[code] === undefined) {
+      volume *= BigInt(state.domains[code].length);
+    }
+  }
+  return volume;
+}
+
 function freezeSnapshot(
   index: number,
   state: WorkingState,
   stack: readonly SearchFrame[],
   searchTree: readonly SearchTreeDecision[],
   propagationEnabled: boolean,
+  totalOutcomeCount: bigint,
+  remainingOutcomeCount: bigint,
   metrics: MutableMetrics,
   omittedEvents: number,
   context: EventContext,
@@ -249,6 +272,11 @@ function freezeSnapshot(
     omittedEvents,
     runTerminatedByLimit: false,
   });
+  const outcomes: OutcomeSpaceMetrics = Object.freeze({
+    total: totalOutcomeCount.toString(),
+    remaining: remainingOutcomeCount.toString(),
+    eliminated: (totalOutcomeCount - remainingOutcomeCount).toString(),
+  });
 
   return Object.freeze({
     index,
@@ -260,6 +288,7 @@ function freezeSnapshot(
     searchTree,
     propagationEnabled,
     metrics: frozenMetrics,
+    outcomes,
     currentState: context.currentState,
     affectedState: context.affectedState,
   });
@@ -357,6 +386,10 @@ export function generateTrace(
   }
 
   const initialState = makeInitialState(colorIds);
+  const totalOutcomeCount =
+    BigInt(colorIds.length) ** BigInt(STATE_CODES.length);
+  let remainingOutcomeCount = totalOutcomeCount;
+  const eliminatedBranches = new WeakSet<WorkingState>();
   const snapshots: TraceSnapshot[] = [];
   const metrics: MutableMetrics = {
     assignments: 0,
@@ -374,6 +407,19 @@ export function generateTrace(
   const treeDecisionIndexes = new Map<string, number>();
   let nextDecisionId = 1;
   let nextBranchId = 1;
+
+  const eliminateOutcomes = (count: bigint): void => {
+    if (count < BigInt(0) || count > remainingOutcomeCount) {
+      throw new Error("Solver outcome accounting invariant failed.");
+    }
+    remainingOutcomeCount -= count;
+  };
+
+  const eliminateActiveBranch = (state: WorkingState): void => {
+    if (eliminatedBranches.has(state)) return;
+    eliminatedBranches.add(state);
+    eliminateOutcomes(activeBranchVolume(state));
+  };
 
   const addTreeDecision = (
     state: StateCode,
@@ -448,6 +494,8 @@ export function generateTrace(
         stack,
         freezeSearchTree(searchTree, stack),
         propagationEnabled,
+        totalOutcomeCount,
+        remainingOutcomeCount,
         metrics,
         omittedEvents,
         context,
@@ -529,6 +577,42 @@ export function generateTrace(
     return selected;
   };
 
+  const findAssignedConflict = (
+    state: WorkingState,
+    variable: StateCode,
+    colorId: string,
+  ): StateCode | undefined =>
+    ADJACENCY[variable].find(
+      (neighbor) => state.assignments[neighbor] === colorId,
+    );
+
+  const emitAssignmentConflict = (
+    state: WorkingState,
+    variable: StateCode,
+    colorId: string,
+    conflict: StateCode,
+    stack: readonly SearchFrame[],
+  ): void => {
+    eliminateActiveBranch(state);
+    state.domains[variable] = [];
+    emit(state, stack, {
+      status: "contradiction",
+      currentState: variable,
+      affectedState: variable,
+      event: {
+        type: "contradiction",
+        title: `${STATE_NAMES[variable]} conflicts with ${STATE_NAMES[conflict]}`,
+        narration: `${STATE_NAMES[variable]} cannot use ${colorId}, because neighboring ${STATE_NAMES[conflict]} already uses it.`,
+        formal: `${variable} = ${colorId} conflicts with ${conflict} = ${colorId}`,
+        state: variable,
+        causeState: conflict,
+        colorId,
+        previousDomain: [colorId],
+        nextDomain: [],
+      },
+    });
+  };
+
   const propagate = (
     state: WorkingState,
     startingState: StateCode,
@@ -544,6 +628,7 @@ export function generateTrace(
         const neighborAssignment = state.assignments[neighbor];
         if (neighborAssignment !== undefined) {
           if (neighborAssignment === colorId) {
+            eliminateActiveBranch(state);
             state.domains[neighbor] = [];
             emit(state, stack, {
               status: "contradiction",
@@ -568,8 +653,12 @@ export function generateTrace(
 
         const previousDomain = state.domains[neighbor];
         if (!previousDomain.includes(colorId)) continue;
+        const volumeBeforeReduction = activeBranchVolume(state);
         const nextDomain = previousDomain.filter((candidate) => candidate !== colorId);
         state.domains[neighbor] = nextDomain;
+        eliminateOutcomes(
+          volumeBeforeReduction - activeBranchVolume(state),
+        );
         metrics.domainReductions += 1;
         emit(state, stack, {
           status: "searching",
@@ -610,6 +699,21 @@ export function generateTrace(
 
         if (nextDomain.length === 1) {
           const forcedColor = nextDomain[0];
+          const forcedConflict = findAssignedConflict(
+            state,
+            neighbor,
+            forcedColor,
+          );
+          if (forcedConflict) {
+            emitAssignmentConflict(
+              state,
+              neighbor,
+              forcedColor,
+              forcedConflict,
+              stack,
+            );
+            return false;
+          }
           state.assignments[neighbor] = forcedColor;
           metrics.assignments += 1;
           emit(state, stack, {
@@ -633,37 +737,6 @@ export function generateTrace(
       }
     }
     return true;
-  };
-
-  const checkAssignedNeighborConflict = (
-    state: WorkingState,
-    variable: StateCode,
-    stack: readonly SearchFrame[],
-  ): boolean => {
-    const colorId = state.assignments[variable];
-    const conflict = ADJACENCY[variable].find(
-      (neighbor) => state.assignments[neighbor] === colorId,
-    );
-    if (!conflict || colorId === undefined) return true;
-
-    state.domains[variable] = [];
-    emit(state, stack, {
-      status: "contradiction",
-      currentState: variable,
-      affectedState: variable,
-      event: {
-        type: "contradiction",
-        title: `${STATE_NAMES[variable]} conflicts with ${STATE_NAMES[conflict]}`,
-        narration: `${STATE_NAMES[variable]} and neighboring ${STATE_NAMES[conflict]} both use ${colorId}, so this color is rejected.`,
-        formal: `${variable} = ${colorId} conflicts with ${conflict} = ${colorId}`,
-        state: variable,
-        causeState: conflict,
-        colorId,
-        previousDomain: [colorId],
-        nextDomain: [],
-      },
-    });
-    return false;
   };
 
   const search = (
@@ -736,24 +809,35 @@ export function generateTrace(
       const branchStack = [...stack, activeFrame];
       metrics.maxSearchDepth = Math.max(metrics.maxSearchDepth, branchStack.length);
 
-      emit(branch, branchStack, {
-        status: "searching",
-        currentState: variable,
-        event: {
-          type: "try-color",
-          title: `${STATE_NAMES[variable]} tries ${colorId}`,
-          narration: "Depth-first search tries the first remaining color in palette order.",
-          formal: `${variable} ← ${colorId}`,
-          state: variable,
+      const explicitConflict = findAssignedConflict(branch, variable, colorId);
+      let branchConsistent = explicitConflict === undefined;
+      if (explicitConflict) {
+        emitAssignmentConflict(
+          branch,
+          variable,
           colorId,
-          previousDomain: candidates,
-          nextDomain: [colorId],
-        },
-      });
-
-      const branchConsistent = propagationEnabled
-        ? propagate(branch, variable, branchStack)
-        : checkAssignedNeighborConflict(branch, variable, branchStack);
+          explicitConflict,
+          branchStack,
+        );
+      } else {
+        emit(branch, branchStack, {
+          status: "searching",
+          currentState: variable,
+          event: {
+            type: "try-color",
+            title: `${STATE_NAMES[variable]} tries ${colorId}`,
+            narration: "Depth-first search tries the first remaining color in palette order.",
+            formal: `${variable} ← ${colorId}`,
+            state: variable,
+            colorId,
+            previousDomain: candidates,
+            nextDomain: [colorId],
+          },
+        });
+        if (propagationEnabled) {
+          branchConsistent = propagate(branch, variable, branchStack);
+        }
+      }
       let rejectionReason: SearchTreeRejectionReason = "contradiction";
       if (branchConsistent) {
         const solved = search(branch, branchStack);
@@ -807,6 +891,11 @@ export function generateTrace(
       true,
     );
   } else if (!solvedState) {
+    if (remainingOutcomeCount !== BigInt(0)) {
+      throw new Error(
+        "Exhaustive unsatisfiable search left uneliminated outcomes.",
+      );
+    }
     emit(
       initialState,
       [],

@@ -99,6 +99,67 @@ function optionMark(status: SearchTreeOption["status"]) {
   return "·";
 }
 
+function groupDecimal(decimal: string) {
+  const normalized = decimal.replace(/^0+(?=\d)/, "") || "0";
+  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatOutcomeCount(decimal: string) {
+  const normalized = decimal.replace(/^0+(?=\d)/, "") || "0";
+  if (normalized.length <= 12) {
+    const grouped = groupDecimal(normalized);
+    return { display: grouped, exact: grouped, spoken: grouped };
+  }
+  const fraction = normalized.slice(1, 4).replace(/0+$/, "");
+  const mantissa = `${normalized[0]}${fraction ? `.${fraction}` : ""}`;
+  const exponent = normalized.length - 1;
+  return {
+    display: `${mantissa} × 10^${exponent}`,
+    exact: groupDecimal(normalized),
+    spoken: `${mantissa} times ten to the power of ${exponent}`,
+  };
+}
+
+function decimalLog10(decimal: string) {
+  const normalized = decimal.replace(/^0+/, "");
+  if (!normalized) return Number.NEGATIVE_INFINITY;
+  const leading = Number(`${normalized[0]}.${normalized.slice(1, 12)}`);
+  return normalized.length - 1 + Math.log10(leading);
+}
+
+function decimalOrder(decimal: string) {
+  const normalized = decimal.replace(/^0+/, "");
+  return normalized ? normalized.length - 1 : null;
+}
+
+function logRemainingPercent(remaining: string, total: string) {
+  if (/^0+$/.test(remaining)) return 0;
+  if (remaining === total) return 100;
+  const totalLog = decimalLog10(total);
+  const remainingLog = decimalLog10(remaining);
+  if (!Number.isFinite(totalLog) || totalLog <= 0) return remaining === total ? 100 : 0;
+  return Math.max(1, Math.min(99, ((remainingLog + 1) / (totalLog + 1)) * 100));
+}
+
+function teachingNarration(
+  event: { type: string; narration: string },
+  palette: PaletteColor[],
+) {
+  if (event.type === "limit-reached") {
+    return "The comparison reached its computation safety limit before search finished.";
+  }
+  return paletteText(event.narration, palette);
+}
+
+function teachingTitle(
+  event: { type: string; title: string },
+  palette: PaletteColor[],
+) {
+  return event.type === "limit-reached"
+    ? "Computation safety limit reached"
+    : paletteText(event.title, palette);
+}
+
 function DFSTree({
   decisions,
   palette,
@@ -107,30 +168,13 @@ function DFSTree({
   palette: readonly PaletteColor[];
 }) {
   const treeRef = useRef<HTMLElement>(null);
-  const { roots, childrenByBranch, visibleIds } = useMemo(() => {
-    const children = new Map<string, SearchTreeDecision[]>();
-    for (const decision of decisions) {
-      if (decision.parentBranchId) {
-        const branchChildren = children.get(decision.parentBranchId) ?? [];
-        branchChildren.push(decision);
-        children.set(decision.parentBranchId, branchChildren);
-      }
-    }
-
-    const visible = new Set(decisions.map((decision) => decision.id));
-
-    return {
-      roots: decisions.filter((decision) => !decision.parentBranchId && visible.has(decision.id)),
-      childrenByBranch: children,
-      visibleIds: visible,
-    };
-  }, [decisions]);
 
   useEffect(() => {
     const tree = treeRef.current;
-    const activeOption = tree?.querySelector<HTMLElement>(
-      ".tree-option--active > .tree-option-token, .tree-option--solution > .tree-option-token",
+    const liveRows = tree?.querySelectorAll<HTMLElement>(
+      ".tree-row.is-live, .tree-row.is-solution",
     );
+    const activeOption = liveRows?.[liveRows.length - 1];
     if (!tree || !activeOption) return;
     const treeBounds = tree.getBoundingClientRect();
     const optionBounds = activeOption.getBoundingClientRect();
@@ -139,71 +183,65 @@ function DFSTree({
     }
   }, [decisions]);
 
-  function renderDecision(decision: SearchTreeDecision) {
-    const hasLiveOption = decision.options.some(
-      (option) => option.status === "active" || option.status === "solution",
-    );
-    return (
-      <li
-        className={`tree-decision${hasLiveOption ? " is-live" : ""}`}
-        key={decision.id}
-      >
-        <div className="tree-decision-label">
-          <span>D{decision.depth}</span>
-          <strong>{decision.state}</strong>
-          <small>{STATE_NAMES[decision.state]}</small>
+  return (
+    <section className="dfs-tree" aria-labelledby="tree-heading" ref={treeRef}>
+      <div className="dfs-tree-top">
+        <div className="dfs-tree-heading">
+          <div>
+            <p className="kicker">Dense branch view</p>
+            <h3 id="tree-heading">DFS tree</h3>
+          </div>
+          <span>{decisions.length} visible nodes</span>
         </div>
-        <ol className="tree-options" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
-          {decision.options.map((option) => {
-            const color = palette.find((item) => item.id === option.colorId);
-            const optionChildren = option.branchId
-              ? (childrenByBranch.get(option.branchId) ?? []).filter((child) =>
-                  visibleIds.has(child.id),
-                )
-              : [];
-            const statusLabel = optionStatusLabel(option);
+        <div className="tree-key" aria-label="Tree option key">
+          <span><b className="tree-key-live">→</b> exploring</span>
+          <span><b className="tree-key-cut">×</b> rejected / pruned</span>
+        </div>
+      </div>
+      {decisions.length > 0 ? (
+        <ol className="tree-rows">
+          {decisions.map((decision) => {
+            const active = decision.options.some((option) => option.status === "active");
+            const solution = decision.options.some((option) => option.status === "solution");
+            const exhausted = decision.options.every(
+              (option) => option.status === "pruned" || option.status === "rejected",
+            );
+            const indent = Math.min(Math.max(decision.depth - 1, 0), 8) * 7;
             return (
-              <li className={`tree-option tree-option--${option.status}`} key={option.colorId}>
-                <div
-                  className="tree-option-token"
-                  aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
-                  title={`${color?.name ?? option.colorId}: ${statusLabel}`}
-                >
-                  <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
-                    {color?.symbol ?? "?"}
-                  </i>
-                  <span>{color?.name ?? option.colorId}</span>
-                  <b aria-hidden="true">{optionMark(option.status)}</b>
-                  <small>{statusLabel}</small>
+              <li
+                className={`tree-row${active ? " is-live" : ""}${solution ? " is-solution" : ""}${exhausted ? " is-exhausted" : ""}`}
+                key={decision.id}
+                style={{ "--tree-indent": `${indent}px` } as React.CSSProperties}
+              >
+                <div className="tree-row-line">
+                  <span className="tree-depth">{decision.depth}</span>
+                  <strong title={STATE_NAMES[decision.state]}>{decision.state}</strong>
+                  <span className="tree-branch-line" aria-hidden="true" />
+                  <div className="tree-mini-options" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
+                    {decision.options.map((option) => {
+                      const color = palette.find((item) => item.id === option.colorId);
+                      const statusLabel = optionStatusLabel(option);
+                      return (
+                        <span
+                          className={`tree-mini-option tree-option--${option.status}`}
+                          key={option.colorId}
+                          aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                          title={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                        >
+                          <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
+                            {color?.symbol ?? "?"}
+                          </i>
+                          <b aria-hidden="true">{optionMark(option.status)}</b>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <small>{solution ? "solution" : active ? "active" : exhausted ? "closed" : "open"}</small>
                 </div>
-                {optionChildren.length > 0 && (
-                  <ol className="tree-children">
-                    {optionChildren.map(renderDecision)}
-                  </ol>
-                )}
               </li>
             );
           })}
         </ol>
-      </li>
-    );
-  }
-
-  return (
-    <section className="dfs-tree" aria-labelledby="tree-heading" ref={treeRef}>
-      <div className="dfs-tree-heading">
-        <div>
-          <p className="kicker">Branch by branch</p>
-          <h3 id="tree-heading">DFS tree</h3>
-        </div>
-        <span>{decisions.length} visible nodes</span>
-      </div>
-      <div className="tree-key" aria-label="Tree option key">
-        <span><b className="tree-key-live">→</b> exploring</span>
-        <span><b className="tree-key-cut">×</b> rejected / pruned</span>
-      </div>
-      {roots.length > 0 ? (
-        <ol className="tree-roots">{roots.map(renderDecision)}</ol>
       ) : (
         <p className="tree-empty">Press Step to reveal the first decision and its color branches.</p>
       )}
@@ -217,6 +255,7 @@ export function MapColoringLab() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [propagationEnabled, setPropagationEnabled] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedState, setSelectedState] = useState<StateCode | null>(null);
   const [stateQuery, setStateQuery] = useState("");
   const colorSequence = useRef(STARTER_PALETTE.length);
@@ -284,9 +323,10 @@ export function MapColoringLab() {
     if (!snapshot) return "Solver ready.";
     if (speed === SPEEDS.length - 1 && !terminal && cursor % 4 !== 0) return "";
     if (speed === SPEEDS.length - 1 && !terminal) {
-      return `Search update with propagation ${propagationEnabled ? "on" : "off"}: ${snapshot.metrics.remainingColorAttempts} color attempts remain, ${snapshot.metrics.assignments} assignments, and ${snapshot.metrics.backtracks} backtracks.`;
+      const outcomeCount = formatOutcomeCount(snapshot.outcomes.remaining);
+      return `Search update with propagation ${propagationEnabled ? "on" : "off"}: ${outcomeCount.spoken} complete outcomes remain, ${snapshot.metrics.assignments} assignments, and ${snapshot.metrics.backtracks} backtracks.`;
     }
-    return paletteText(snapshot.event.narration, palette);
+    return teachingNarration(snapshot.event, palette);
   }, [cursor, palette, propagationEnabled, snapshot, speed, terminal]);
 
   function pauseAndMove(nextCursor: number) {
@@ -330,7 +370,15 @@ export function MapColoringLab() {
 
   const assignmentCount = Object.keys(snapshot?.assignments ?? {}).length;
   const event = snapshot.event;
-  const eventTitle = paletteText(event.title, palette);
+  const eventTitle = teachingTitle(event, palette);
+  const remainingOutcomes = formatOutcomeCount(snapshot.outcomes.remaining);
+  const totalOutcomes = formatOutcomeCount(snapshot.outcomes.total);
+  const remainingMagnitude = logRemainingPercent(
+    snapshot.outcomes.remaining,
+    snapshot.outcomes.total,
+  );
+  const remainingOrder = decimalOrder(snapshot.outcomes.remaining);
+  const totalOrder = decimalOrder(snapshot.outcomes.total);
   const playbackStatus = playing
     ? "Running"
     : snapshot.status === "solved"
@@ -353,10 +401,11 @@ export function MapColoringLab() {
         <div className="lesson-heading" id="top">
           <p className="eyebrow">Constraint propagation, drawn out</p>
           <h1>Watch constraints travel across the map.</h1>
-          <p className="intro-copy">
-            Give every state a color, but never match a land-border neighbor. We’ll
-            reveal every decision the search makes along the way.
-          </p>
+          <div className="concept-key" aria-label="Concept key">
+            <span><b>State</b> = variable</span>
+            <span><b>Dots</b> = available colors</span>
+            <span><b>Border</b> = constraint</span>
+          </div>
         </div>
         <details className="read-guide">
           <summary>How to read this</summary>
@@ -366,16 +415,11 @@ export function MapColoringLab() {
             <li><strong>Follow the stack:</strong> it records the search’s open decisions.</li>
           </ol>
         </details>
-        <div className="concept-key" aria-label="Concept key">
-          <span><b>State</b> = variable</span>
-          <span><b>Dots</b> = available colors</span>
-          <span><b>Border</b> = constraint</span>
-        </div>
       </header>
 
-      <section className="workbench" aria-label="Interactive map coloring lesson">
+      <section className={`workbench${detailsOpen ? " details-open" : ""}`} aria-label="Interactive map coloring lesson">
         <div className="map-column">
-          <section className="control-board" aria-label="Solver controls">
+          <section className="control-board monitor-strip" aria-label="Live solver monitor">
             <div className="playback-controls">
               <button
                 className="control-button primary-control"
@@ -421,7 +465,7 @@ export function MapColoringLab() {
 
             <label className="speed-control">
               <span className="speed-label">
-                <span>Playback speed</span>
+                <span>Speed</span>
                 <strong>{SPEEDS[speed].label}</strong>
               </span>
               <input
@@ -433,40 +477,68 @@ export function MapColoringLab() {
                 onChange={(event) => setSpeed(Number(event.target.value))}
                 aria-valuetext={`${SPEEDS[speed].label}, one step every ${SPEEDS[speed].interval} milliseconds`}
               />
-              <span className="speed-ends" aria-hidden="true"><span>Explain</span><span>Fast</span></span>
             </label>
+            <div className="monitor-mode">
+              <span>Propagation</span><strong>{propagationEnabled ? "ON" : "OFF"}</strong>
+              <small>{playbackStatus}</small>
+            </div>
+            <div className="outcome-monitor">
+              <span id="outcome-label">Outcomes not yet eliminated · start {palette.length}^50</span>
+              <output
+                aria-label={`${remainingOutcomes.exact} complete outcomes remaining with constraint propagation ${propagationEnabled ? "on" : "off"}`}
+                title={`Exact remaining outcomes: ${remainingOutcomes.exact}`}
+              >
+                {remainingOutcomes.display}
+              </output>
+              <details className="outcome-exact">
+                <summary>Exact count</summary>
+                <span>{remainingOutcomes.exact}</span>
+              </details>
+              <div className="outcome-cue">
+                <small>Magnitude remaining · log scale</small>
+                <div
+                  className="outcome-depletion"
+                  role="img"
+                  aria-label={remainingOrder === null
+                    ? "No complete outcomes remain"
+                    : `Outcome-space magnitude is now order ten to the power of ${remainingOrder}, from a starting order of ten to the power of ${totalOrder}`}
+                  title={`${remainingOutcomes.exact} of ${totalOutcomes.exact} complete outcomes remain`}
+                >
+                  <span style={{ width: `${remainingMagnitude}%` }} />
+                </div>
+              </div>
+            </div>
+            <dl className="monitor-counters">
+              <div><dt>Assigned</dt><dd>{assignmentCount}/50</dd></div>
+              <div><dt>Reductions</dt><dd>{snapshot.metrics.domainReductions}</dd></div>
+              <div><dt>Backtracks</dt><dd>{snapshot.metrics.backtracks}</dd></div>
+              <div><dt>Depth</dt><dd>{snapshot.metrics.searchDepth}</dd></div>
+            </dl>
+            <button
+              className="details-toggle"
+              type="button"
+              aria-expanded={detailsOpen}
+              aria-controls="lesson-details"
+              onClick={() => setDetailsOpen((open) => !open)}
+            >
+              {detailsOpen ? "Close details" : "Open details"}
+              <span aria-hidden="true">{detailsOpen ? "×" : "ⓘ"}</span>
+            </button>
           </section>
 
-          <section className="comparison-board" aria-labelledby="work-heading">
-            <div className="work-readout">
-              <div className="work-heading-row">
-                <div>
-                  <p className="kicker">A precise workload count</p>
-                  <h2 id="work-heading">Color attempts remaining</h2>
-                </div>
-                <span className={`mode-pill mode-pill--${propagationEnabled ? "on" : "off"}`}>
-                  Propagation {propagationEnabled ? "ON" : "OFF"}
-                </span>
-              </div>
-              <output aria-label={`${snapshot.metrics.remainingColorAttempts} color attempts remaining with constraint propagation ${propagationEnabled ? "on" : "off"}`}>
-                {snapshot.metrics.remainingColorAttempts.toLocaleString()}
-              </output>
-              <p>
-                {snapshot.metrics.colorAttempts.toLocaleString()} tried so far · {snapshot.metrics.totalColorAttempts.toLocaleString()} in this deterministic run
-              </p>
-              {snapshot.metrics.omittedEvents > 0 && (
-                <p className="trace-compression-note">
-                  {snapshot.metrics.omittedEvents.toLocaleString()} intermediate teaching events are folded for performance; attempt totals remain exact.
-                </p>
-              )}
-              {snapshot.status === "limit-reached" && (
-                <div className="limit-warning" role="status">
-                  <strong>Comparison stopped at the {snapshot.metrics.colorAttempts.toLocaleString()}-attempt safety limit.</strong>
-                  The search was not exhausted, so zero here does not mean no solution exists.
-                </div>
-              )}
+          {snapshot.status === "limit-reached" && (
+            <div className="limit-warning global-limit" role="status">
+              <strong>The comparison reached its computation safety limit.</strong>
+              Search was not exhausted. Remaining complete outcomes are exact assignments not yet disproved, not a runtime estimate.
             </div>
-            <fieldset className="propagation-switch">
+          )}
+
+          <section className="comparison-board configuration-mode" aria-labelledby="mode-heading">
+            <div className="configuration-title">
+              <p className="kicker">Lesson setup</p>
+              <h2 id="mode-heading">Propagation mode</h2>
+            </div>
+            <fieldset className="propagation-switch compact-switch">
               <legend>Constraint propagation</legend>
               <div>
                 <button
@@ -475,7 +547,7 @@ export function MapColoringLab() {
                   onClick={() => choosePropagationMode(true)}
                 >
                   <b>ON</b>
-                  <span>Remove impossible colors early</span>
+                  <span>Prune early</span>
                 </button>
                 <button
                   type="button"
@@ -483,10 +555,9 @@ export function MapColoringLab() {
                   onClick={() => choosePropagationMode(false)}
                 >
                   <b>OFF</b>
-                  <span>Reject conflicts only when tried</span>
+                  <span>Check when tried</span>
                 </button>
               </div>
-              <p>Switch modes to reset the trace and compare the same palette fairly.</p>
             </fieldset>
           </section>
 
@@ -596,7 +667,8 @@ export function MapColoringLab() {
           </section>
         </div>
 
-        <aside className="lesson-sidebar" aria-label="Solver explanation and progress">
+        {detailsOpen && (
+        <aside id="lesson-details" className="lesson-sidebar" aria-label="Solver explanation and progress">
           <section className={`event-card event-${eventTone(event.type)}`} aria-labelledby="event-heading">
             <p className="event-number">{playbackStatus} · Event {cursor + 1} of {trace.length}</p>
             <div className="event-heading-row">
@@ -608,8 +680,8 @@ export function MapColoringLab() {
                 <h2 id="event-heading">{eventTitle}</h2>
               </div>
             </div>
-            <p className="event-description">{paletteText(event.narration, palette)}</p>
-            {event.formal && <code className="formal-note">{paletteText(event.formal, palette)}</code>}
+            <p className="event-description">{teachingNarration(event, palette)}</p>
+            {event.formal && event.type !== "limit-reached" && <code className="formal-note">{paletteText(event.formal, palette)}</code>}
 
             {snapshot?.status === "solved" && (
               <div className="completion-note" role="status">
@@ -631,8 +703,8 @@ export function MapColoringLab() {
             )}
             {snapshot?.status === "limit-reached" && (
               <div className="limit-warning" role="status">
-                <strong>The comparison reached its safety limit.</strong> Search stopped after
-                {snapshot.metrics.colorAttempts.toLocaleString()} color attempts without proving a solution or proving impossibility.
+                <strong>The comparison reached its computation safety limit.</strong>
+                Search stopped without proving a solution or proving impossibility.
               </div>
             )}
 
@@ -728,8 +800,8 @@ export function MapColoringLab() {
               <div><dt>Reductions</dt><dd>{snapshot?.metrics.domainReductions ?? 0}</dd></div>
               <div><dt>Backtracks</dt><dd>{snapshot?.metrics.backtracks ?? 0}</dd></div>
               <div><dt>Max depth</dt><dd>{snapshot?.metrics.maxSearchDepth ?? 0}</dd></div>
-              <div><dt>Color attempts</dt><dd>{snapshot?.metrics.colorAttempts ?? 0}</dd></div>
-              <div><dt>Attempts left</dt><dd>{snapshot?.metrics.remainingColorAttempts ?? 0}</dd></div>
+              <div><dt>Outcomes left</dt><dd title={remainingOutcomes.exact}>{remainingOutcomes.display}</dd></div>
+              <div><dt>Event</dt><dd>{cursor + 1}/{trace.length}</dd></div>
             </dl>
           </section>
 
@@ -751,13 +823,14 @@ export function MapColoringLab() {
                     aria-current={item.index === snapshot.index ? "step" : undefined}
                   >
                     <span>{item.index + 1}</span>
-                    <span><strong>{paletteText(item.event.title, palette)}</strong><small>{paletteText(item.event.narration, palette)}</small></span>
+                    <span><strong>{teachingTitle(item.event, palette)}</strong><small>{teachingNarration(item.event, palette)}</small></span>
                   </button>
                 </li>
               )).reverse()}
             </ol>
           </section>
         </aside>
+        )}
       </section>
 
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveMessage}</div>

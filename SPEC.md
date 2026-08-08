@@ -15,7 +15,7 @@ After using the page, a learner should be able to explain:
 3. Propagation can force assignments or reveal a contradiction before the entire map is colored.
 4. Depth-first search explores one branch at a time and backtracks when a domain becomes empty.
 5. The number of available colors changes whether a valid coloring exists and how much search is required.
-6. Constraint propagation reduces the amount of depth-first-search work compared with checking constraints only after choosing a color.
+6. Constraint propagation can eliminate entire families of complete assignments before depth-first search visits them.
 
 ## 3. Audience and tone
 
@@ -30,9 +30,11 @@ After using the page, a learner should be able to explain:
 - **Constraints:** states that share a land boundary must have different assigned colors. Corner-only contact does not count. Alaska and Hawaii have no graph edges.
 - **Search:** deterministic depth-first backtracking search.
 - **Propagation:** after a tentative assignment, remove that color from every unassigned neighbor. Continue through the resulting forced assignments until stable or until a domain is empty.
+- **Immediate conflict invariant:** before emitting any later assignment event, validate every explicit or forced assignment against all already assigned neighbors. An equal-colored adjacent pair must produce the contradiction immediately; it may never remain visible while unrelated states are assigned.
 - **Comparison mode:** the learner can turn constraint propagation on or off. Both modes use the same variable ordering, value ordering, palette, and validity checks so the visible difference in search work is attributable to propagation. Changing modes resets to the deterministic start of the corresponding trace.
-- **Variable ordering:** minimum remaining values (smallest domain first), with state abbreviation as the stable tie-breaker. The explanation panel must name this rule.
+- **Variable ordering:** minimum remaining values (smallest domain first), with state abbreviation as the stable tie-breaker. The optional details sidebar must name this rule.
 - **Value ordering:** palette order, left to right, so a reset followed by Run always produces the same trace.
+- **Remaining search space:** the exact number of complete assignments of colors to all 50 states that have not yet been eliminated by constraints or search evidence. With `k` available colors, a fresh run starts at `k^50`; this is an outcome-space measure, not a count of future solver events or an estimate of runtime.
 - **Completion states:** solved, unsatisfiable for the selected palette, paused, or ready.
 
 The solver should be implemented as a pure step generator/state machine. Each educationally meaningful action is its own event, such as `select-variable`, `try-color`, `remove-color`, `forced-assignment`, `contradiction`, `backtrack`, and `solved`. Separating solver events from animation timing makes Run, Pause, Step, speed changes, tests, and reduced motion reliable.
@@ -61,9 +63,9 @@ The primary viewport should prioritize the map, not generic dashboard chrome.
 - The state being tried, affected neighbors, forced states, and contradicted state use distinct, redundant treatments (color plus outline/icon/label), not color alone.
 - Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver.
 - Hover/focus reveals the state name, assigned value, full domain, and land-border neighbors.
-- A depth-first-search tree sits directly beside the map on wide screens and immediately below it on smaller screens. The map and tree advance from the same trace snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
+- A dense depth-first-search tree sits directly beside the map on wide and medium/tablet screens, stacking immediately below it only on true small/mobile screens. It must comfortably represent a full 50-state decision path without forcing the learner to switch views. The map and tree advance from the same trace snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
 - Each tree decision shows its color candidates in palette order. Tried candidates retain their outcome; rejected or pruned candidates are visibly crossed out with a text/icon cue, and the active candidate is highlighted without relying on color alone.
-- The tree may window or summarize older branches to remain readable, but it must preserve the active root-to-leaf path and the most recent abandoned branch.
+- The tree may compact or window older abandoned branches to remain readable, but it must preserve every level of the active root-to-leaf path, clearly indicate its current depth out of 50, and retain the most recent abandoned branch.
 
 ### 5.3 Control bar
 
@@ -77,12 +79,13 @@ The controls remain close to the map and are usable on touch screens.
 - **Constraint propagation switch**: toggles propagation on/off, clearly labels the active mode, and regenerates the deterministic trace from the start for an honest comparison.
 - **Palette control**: add or remove colors dynamically. Start with four visually distinct, color-vision-friendly colors. The engine accepts any palette length; the interface warns that very large palettes are visually compressed rather than changing solver semantics.
 - **Preset buttons**: “Try 3 colors,” “Classic 4,” and “Show a backtrack” provide quick teaching entry points. A preset may set palette and deterministic starting conditions, but must use the same solver rather than a prerecorded fake animation.
+- **Sticky monitor strip**: a compact strip remains visible while the learner uses the map or scrolls. It always shows the remaining search space, solver status, active propagation mode, and current playback speed. The speed value remains visible even when its slider is not.
 
 Controls must disable only when their action is impossible and must expose an explanation through accessible text or a tooltip.
 
-### 5.4 Explanation panel
+### 5.4 Optional details sidebar
 
-A persistent panel translates the current event into plain language.
+Rich explanation and inspection tools live in a sidebar that is collapsed by default. Opening it must not cover the active map or DFS path, and collapsing it expands the main map-and-tree area to use the reclaimed width. The sticky monitor strip keeps essential status and speed visible when the sidebar is closed.
 
 - Event heading, for example “Colorado tries coral.”
 - One-sentence cause and effect, for example “Colorado borders Utah, so coral is removed from Utah’s options.”
@@ -96,11 +99,15 @@ A persistent panel translates the current event into plain language.
 - The visible DFS tree is the primary search view; a compact active-path summary may supplement it when useful.
 - Backtracked branches and rejected color candidates remain visible as struck-through or dimmed entries so the learner sees exactly what was abandoned.
 - Counters for assignments, domain reductions, backtracks, and search depth.
-- A prominent **color attempts remaining** number reports how many `try-color` events remain after the current snapshot in the selected deterministic trace. It is calculated with the same definition in propagation-on and propagation-off modes, includes the current attempt only until that event is passed, and reaches zero at terminal state. The UI must not call this “solutions remaining,” because untried branches are attempts rather than guaranteed solutions.
-- A fixed color-attempt safety cap prevents intentionally difficult propagation-off runs from freezing the browser. If the cap is reached, the terminal state must say that the comparison stopped before exhausting the search; zero remaining then refers only to the generated capped trace, not proof of unsatisfiability.
-- The active propagation mode appears beside the remaining-work number so screenshots or classroom A/B demonstrations cannot be misread.
+- A prominent **remaining search space** number reports the exact count of complete 50-state color assignments that have not yet been eliminated. A fresh run with `k` palette colors starts at exactly `k^50`, including assignments that will later prove invalid.
+- The metric is monotonic within a run: it may stay the same or decrease, but never increase. Removing a color from a state's domain eliminates the complete assignments that require that state/color pairing in the current search context; proving a branch contradictory eliminates that branch's full remaining outcome volume. The count must avoid double-counting outcomes already eliminated by an earlier reduction.
+- Entering or trying a DFS branch does not by itself eliminate any outcome, and it must not make the number fall merely because that branch is being visited. Untried siblings remain in the count until constraints, contradiction, or exhaustive search actually rule them out. Consequently, stopping after finding one valid coloring may leave a nonzero remaining search space.
+- This number is not a runtime forecast, completion percentage, future-event count, or count of solutions. The same definition is used with propagation on and off so learners can compare when each mode proves outcome volume impossible.
+- Large values use a readable scientific-notation summary while preserving the exact integer. The exact value must be available visually on demand and in the control's accessible name or description, with grouped digits and a copyable representation where practical.
+- A fixed solver-attempt safety cap prevents intentionally difficult propagation-off runs from freezing the browser. It is only an execution safeguard and is never used to calculate or label remaining search space. If the cap is reached, the status must say that search stopped early and the displayed space reflects only eliminations proven so far; reaching the cap alone proves neither satisfiability nor unsatisfiability.
+- The active propagation mode, solver status, and playback speed appear beside the remaining-space number in the sticky monitor strip so screenshots or classroom A/B demonstrations cannot be misread.
 - Progress text that describes algorithm status; do not imply that percentage of colored states predicts remaining runtime.
-- A scrollable event history with short entries. Clicking a history entry inspects that snapshot without mutating the run until the user deliberately resumes from it.
+- A scrollable event history with short entries lives in the optional details sidebar. Clicking a history entry inspects that snapshot without mutating the run until the user deliberately resumes from it.
 
 ### 5.6 Completion and contradiction states
 
@@ -112,7 +119,7 @@ A persistent panel translates the current event into plain language.
 ## 6. Visual direction
 
 - Feel like an excellent classroom whiteboard refined into a modern interactive: warm paper background, ink-like text, crisp dark state boundaries, and vivid domain tokens.
-- Use a responsive two-column desktop layout with the map dominant and the explanation/search panel secondary. Stack controls, map, explanation, and search history on narrow screens.
+- Use a responsive main canvas with the map and dense DFS tree adjacent. A default-collapsed details sidebar supplies explanation, history, and inspection without permanently shrinking the teaching canvas; the main area expands when it is closed.
 - Use restrained motion: a short pulse travels from the assigned state to the neighbor, then the eliminated dot exits. Backtracking reverses/dims the abandoned decision. Motion communicates causality rather than decoration.
 - Honor `prefers-reduced-motion` by removing travel and exit animation while preserving immediate state changes and narration.
 - Do not rely on gradients, stock dashboard styling, or decorative imagery.
@@ -124,14 +131,14 @@ A persistent panel translates the current event into plain language.
 - Each state exposes an accessible label containing its name, assignment status, and remaining color count.
 - Domain colors have text names and stable symbols/numbers; meaning is never encoded by hue alone.
 - Solver narration is announced through a polite live region while rapid playback avoids overwhelming screen readers (summarize batches at the fastest setting).
-- The speed control, palette controls, counters, and history expose programmatic labels.
+- The speed control, palette controls, counters, history, and remaining-search-space display expose programmatic labels. Scientific notation must not replace the exact remaining-space value for assistive technology.
 - Touch targets are at least 44 by 44 CSS pixels where layout permits; map states may use an expanded invisible hit target or inspector list equivalent.
 
 ## 8. Responsive behavior
 
-- **Wide (≥ 1100 px):** map and controls occupy roughly two thirds; explanation and stack occupy one third.
-- **Medium (700–1099 px):** map remains full width, with explanation and stack in a two-column row below.
-- **Small (< 700 px):** one column; sticky compact playback controls; the map is horizontally contained without requiring page-level horizontal scrolling; a searchable state list provides an accessible alternative for tiny shapes.
+- **Wide (≥ 1100 px):** map and dense DFS tree share the expanded main canvas; the optional details sidebar opens alongside them and is collapsed by default.
+- **Medium (700–1099 px):** map and dense DFS tree remain side by side in the main canvas, with proportions adjusted for the narrower viewport; details open as an inline disclosure that does not obscure either view.
+- **Small (< 700 px):** one column; the compact monitor and playback controls remain sticky; the map is horizontally contained without requiring page-level horizontal scrolling; a searchable state list provides an accessible alternative for tiny shapes; optional details expand inline.
 
 ## 9. State and persistence
 
@@ -144,6 +151,7 @@ A persistent panel translates the current event into plain language.
 
 - React/TypeScript in the existing vinext project.
 - Keep solver logic, U.S. adjacency data, and visual components separated.
+- Calculate remaining search space with exact arbitrary-precision integer arithmetic. Scientific notation is a presentation derived from the exact value, never the stored source of truth.
 - Use a vetted static U.S. map asset/data source with a compatible license, checked into the project or bundled as a dependency; do not call a map service at runtime.
 - Keep map adjacency data explicit and testable. Add a validation test that every referenced state exists and every adjacency is symmetric.
 - Solver tests must cover propagation, forced assignments, contradictions, deterministic stepping, backtracking, successful coloring, and unsatisfiable palettes.
@@ -158,15 +166,16 @@ The first version is complete when:
 2. Run, Pause, Step, Back, Reset, and speed controls behave consistently.
 3. Every state visibly communicates remaining options, with the complete domain available through focus/click inspection.
 4. Each propagation event identifies its cause and resulting domain change in plain language.
-5. The depth-first stack and backtracking are visible and synchronized with the map.
-6. The 50-state constraint graph is valid, symmetric, and produces no same-colored adjacent states in a solved run.
+5. The dense depth-first tree and backtracking are visible, synchronized with the map, and capable of showing all 50 levels of the active decision path.
+6. The 50-state constraint graph is valid and symmetric; solved runs contain no same-colored adjacent states, and any tentative adjacent-color conflict is contradicted before another assignment event.
 7. The page clearly distinguishes solved, contradiction, backtracking, and unsatisfiable states.
 8. The experience works with keyboard-only navigation, reduced motion, and small screens.
 9. Automated tests and the production build pass.
 10. Starter copy, starter preview code, and unused starter-only dependencies are removed; repository documentation describes the finished product and its commands.
 11. The DFS tree is adjacent to the map at wide widths, remains synchronized with playback, and crosses out rejected/pruned color candidates.
-12. A learner can switch constraint propagation on/off and compare the consistently defined color-attempts-remaining number.
+12. A learner can switch constraint propagation on/off and compare the same exact remaining-search-space metric, which starts at `k^50`, never increases, and does not decrease merely because a branch is tried.
 13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
+14. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible while the default-collapsed details sidebar allows the main map-and-tree area to expand.
 
 ## 12. Out of scope for the first version
 
