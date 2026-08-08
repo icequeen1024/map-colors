@@ -44,6 +44,8 @@ const SPEEDS = [
   { label: "Fast", interval: 120 },
 ] as const;
 
+const SECONDS_PER_YEAR = BigInt("31557600");
+
 const STATE_OPTIONS = STATE_CODES.map((code) => [code, STATE_NAMES[code]] as const).sort((a, b) =>
   a[1].localeCompare(b[1]),
 );
@@ -117,6 +119,27 @@ function formatOutcomeCount(decimal: string) {
     display: `${mantissa} × 10^${exponent}`,
     exact: groupDecimal(normalized),
     spoken: `${mantissa} times ten to the power of ${exponent}`,
+  };
+}
+
+function formatHumanCheckTime(decimal: string) {
+  const outcomes = BigInt(decimal);
+  if (outcomes === BigInt(0)) {
+    return { display: "0 years", exact: "0 years", spoken: "zero years" };
+  }
+  if (outcomes < SECONDS_PER_YEAR) {
+    return {
+      display: "< 1 year",
+      exact: "Less than 1 year",
+      spoken: "less than one year",
+    };
+  }
+
+  const wholeYears = formatOutcomeCount((outcomes / SECONDS_PER_YEAR).toString());
+  return {
+    display: `≈ ${wholeYears.display} years`,
+    exact: `Approximately ${wholeYears.exact} years`,
+    spoken: `approximately ${wholeYears.spoken} years`,
   };
 }
 
@@ -419,6 +442,7 @@ export function MapColoringLab() {
   const event = snapshot.event;
   const eventTitle = teachingTitle(event, palette);
   const remainingOutcomes = formatOutcomeCount(snapshot.outcomes.remaining);
+  const humanCheckTime = formatHumanCheckTime(snapshot.outcomes.remaining);
   const totalOutcomes = formatOutcomeCount(snapshot.outcomes.total);
   const remainingMagnitude = logRemainingPercent(
     snapshot.outcomes.remaining,
@@ -532,6 +556,7 @@ export function MapColoringLab() {
             <div className="outcome-monitor">
               <span id="outcome-label">Outcomes not yet eliminated · start {palette.length}^50</span>
               <output
+                className="outcome-count"
                 aria-label={`${remainingOutcomes.exact} complete outcomes remaining with constraint propagation ${propagationEnabled ? "on" : "off"}`}
                 title={`Exact remaining outcomes: ${remainingOutcomes.exact}`}
               >
@@ -541,6 +566,16 @@ export function MapColoringLab() {
                 <summary>Exact count</summary>
                 <span>{remainingOutcomes.exact}</span>
               </details>
+              <div className="human-check-time">
+                <span>Human check time</span>
+                <output
+                  aria-label={`${humanCheckTime.spoken} for a human checking one complete outcome per second continuously`}
+                  title={`${humanCheckTime.exact} at one complete outcome per second continuously`}
+                >
+                  {humanCheckTime.display}
+                </output>
+                <small>at 1 complete outcome / second</small>
+              </div>
               <div className="outcome-cue">
                 <small>Magnitude remaining · log scale</small>
                 <div

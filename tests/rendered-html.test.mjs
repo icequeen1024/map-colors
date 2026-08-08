@@ -35,6 +35,13 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /1\.267 × 10\^30/);
   assert.match(html, /1,267,650,600,228,229,401,496,703,205,376/);
   assert.match(html, /Exact count/);
+  assert.match(html, /Human check time/);
+  assert.match(html, /≈ 4\.016 × 10\^22 years/);
+  assert.match(html, /at 1 complete outcome \/ second/);
+  assert.match(
+    html,
+    /aria-label="approximately 4\.016 times ten to the power of 22 years for a human checking one complete outcome per second continuously"/i,
+  );
   assert.match(html, /Magnitude remaining/);
   assert.match(html, /log scale/);
   assert.match(html, /Propagation<\/span><strong>ON<\/strong><small>Ready/);

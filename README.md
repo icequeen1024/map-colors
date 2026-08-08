@@ -34,6 +34,8 @@ This teaching metric is the exact number of complete color assignments to all 50
 
 Remaining search space is not a future-event count, runtime estimate, percentage complete, or count of valid solutions. Large values are summarized in scientific notation while the exact grouped integer remains available visually and to assistive technology. A solver-attempt cap may stop an intentionally expensive run to keep the browser responsive, but that cap is only an execution safeguard and never defines the workload metric.
 
+Beside the count, **Human check time** translates the same remaining outcome space into years at a deliberately simple classroom rate: one complete assignment checked every second, continuously, using a 365.25-day year. The estimate updates from the exact count and is a human-scale comparison, not a prediction of solver or computer runtime.
+
 ## Local development
 
 Requires Node.js 22.13 or later.
