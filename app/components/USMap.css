@@ -1,0 +1,242 @@
+.usMap {
+  --map-ink: #292420;
+  --map-paper: #f4efe3;
+  --map-muted: #6d655d;
+  inline-size: 100%;
+  margin: 0;
+}
+
+.usMap__svg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  overflow: visible;
+  touch-action: manipulation;
+}
+
+.usMap__paper {
+  fill: var(--map-paper);
+  stroke: #d9d0c0;
+  stroke-width: 1.5;
+}
+
+.usMap__insetFrame {
+  fill: none;
+  stroke: #9f9689;
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.usMap__insetLabel {
+  fill: var(--map-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  pointer-events: none;
+}
+
+.usMap__state {
+  cursor: pointer;
+  outline: none;
+}
+
+.usMap__shape {
+  stroke: var(--map-ink);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: fill 180ms ease, filter 180ms ease;
+}
+
+.usMap__state:hover .usMap__shape {
+  filter: brightness(0.96);
+}
+
+.usMap__state:focus-visible .usMap__shape {
+  stroke: #0f0e0d;
+  stroke-width: 3.5;
+}
+
+.usMap__outline {
+  fill: none;
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.usMap__outline--selected {
+  stroke: #11100f;
+  stroke-width: 4.2;
+  stroke-dasharray: 10 4;
+}
+
+.usMap__outline--current {
+  stroke: #673ab7;
+  stroke-width: 4;
+  stroke-dasharray: 3 3;
+}
+
+.usMap__outline--affected {
+  stroke: #087b78;
+  stroke-width: 4;
+  stroke-dasharray: 1 4;
+}
+
+.usMap__outline--forced {
+  stroke: #a94f00;
+  stroke-width: 4;
+  stroke-dasharray: 8 3;
+}
+
+.usMap__outline--contradiction {
+  stroke: #b42318;
+  stroke-width: 5;
+  stroke-dasharray: 2 2;
+  animation: usMap-contradiction 850ms ease-in-out infinite alternate;
+}
+
+.usMap__leader {
+  stroke: #4c4640;
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.usMap__calloutTarget {
+  fill: transparent;
+  stroke: none;
+}
+
+.usMap__labelPlate {
+  fill: rgba(255, 253, 247, 0.9);
+  stroke: rgba(41, 36, 32, 0.52);
+  stroke-width: 0.7;
+  pointer-events: none;
+}
+
+.usMap__stateCode {
+  fill: #191613;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+
+.usMap__domain,
+.usMap__assignedMark,
+.usMap__status {
+  pointer-events: none;
+}
+
+.usMap__domainDot,
+.usMap__assignedMark circle {
+  stroke: rgba(25, 22, 19, 0.88);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.usMap__domainSymbol {
+  fill: #fff;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.62);
+  stroke-width: 1.2px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 6.2px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.usMap__assignedMark text {
+  fill: #fff;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 1.3px;
+  font-size: 8px;
+  font-weight: 950;
+  text-anchor: middle;
+}
+
+.usMap__overflow {
+  fill: #302b27;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 8.5px;
+  font-weight: 900;
+}
+
+.usMap__status circle {
+  stroke: #fffdf7;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.usMap__status text {
+  fill: #fff;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 950;
+  text-anchor: middle;
+}
+
+.usMap__status--current circle {
+  fill: #673ab7;
+}
+
+.usMap__status--affected circle {
+  fill: #087b78;
+}
+
+.usMap__status--forced circle {
+  fill: #a94f00;
+}
+
+.usMap__status--contradiction circle {
+  fill: #b42318;
+}
+
+.usMap__caption {
+  margin-block-start: 0.55rem;
+  color: var(--map-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+@keyframes usMap-contradiction {
+  from {
+    stroke-width: 4;
+  }
+
+  to {
+    stroke-width: 7;
+  }
+}
+
+@media (max-width: 700px) {
+  .usMap__caption {
+    font-size: 0.72rem;
+  }
+
+  .usMap__shape {
+    stroke-width: 1;
+  }
+
+  .usMap__stateCode {
+    font-size: 10.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usMap__shape {
+    transition: none;
+  }
+
+  .usMap__outline--contradiction {
+    animation: none;
+  }
+}

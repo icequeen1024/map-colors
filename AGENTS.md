@@ -23,6 +23,8 @@ Ask before making a choice that would materially change product behavior, archit
 - Do not claim a check passed unless it was run successfully.
 - If a check cannot be run, state exactly what remains unverified and why.
 
+For this project, use `npm test` for the solver/data/render suite, `npm run lint` for static checks, and `npm run build` for the production vinext build. Start the local lesson with `npm run dev`.
+
 ## Git and GitHub Delivery
 
 Completed repository changes, including documentation-only changes, must be committed and pushed to GitHub before the task is considered complete.
