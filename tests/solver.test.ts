@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   ADJACENCY,
   STATE_CODES,
+  STATE_CODES_BOTTOM_UP,
+  STATE_CODES_TOP_DOWN,
   STATE_NAMES,
   generateTrace,
   type StateCode,
@@ -47,7 +49,7 @@ test("the graph contains exactly 50 named states and valid symmetric borders", (
   assert.ok(!ADJACENCY.NY.includes("RI"), "Long Island Sound is not a land edge");
 });
 
-test("trace generation is deterministic and MRV ties use abbreviation order", () => {
+test("trace generation is deterministic and follows the selected map direction", () => {
   const first = generateTrace(FOUR_COLORS);
   const second = generateTrace(FOUR_COLORS);
 
@@ -55,9 +57,50 @@ test("trace generation is deterministic and MRV ties use abbreviation order", ()
   const firstSelection = first.find(
     (snapshot) => snapshot.event.type === "select-variable",
   );
-  assert.equal(firstSelection?.event.state, "AK");
+  assert.equal(firstSelection?.event.state, "WA");
   assert.equal(firstSelection?.event.previousDomain?.join(","), FOUR_COLORS.join(","));
-  assert.match(firstSelection?.event.narration ?? "", /fewest remaining colors/i);
+  assert.match(firstSelection?.event.narration ?? "", /top to bottom/i);
+
+  const bottomUp = generateTrace(FOUR_COLORS, {
+    traversalDirection: "bottom-up",
+  });
+  assert.equal(
+    bottomUp.find((snapshot) => snapshot.event.type === "select-variable")?.event.state,
+    "HI",
+  );
+
+  for (const order of [STATE_CODES_TOP_DOWN, STATE_CODES_BOTTOM_UP]) {
+    assert.equal(order.length, 50);
+    assert.equal(new Set(order).size, 50);
+    assert.deepEqual(new Set(order), new Set(STATE_CODES));
+  }
+});
+
+test("learner guidance replaces one decision and deterministic scanning resumes", () => {
+  const trace = generateTrace(FOUR_COLORS, {
+    propagationEnabled: false,
+    learnerInterventions: [{ decisionIndex: 1, state: "TX" }],
+  });
+  const selections = trace.filter(
+    (snapshot) => snapshot.event.type === "select-variable",
+  );
+
+  assert.deepEqual(
+    selections.slice(0, 3).map((snapshot) => snapshot.event.state),
+    ["WA", "TX", "ME"],
+  );
+  assert.equal(selections[1].event.selectionReason, "learner");
+  assert.equal(selections[1].event.requestedState, "TX");
+  assert.match(selections[1].event.narration, /human guidance/i);
+  assert.equal(selections[2].event.selectionReason, "direction");
+
+  const unavailable = generateTrace(FOUR_COLORS, {
+    learnerInterventions: [{ decisionIndex: 1, state: "WA" }],
+  }).filter((snapshot) => snapshot.event.type === "select-variable")[1];
+  assert.equal(unavailable.event.state, "ME");
+  assert.equal(unavailable.event.selectionReason, "learner-unavailable");
+  assert.equal(unavailable.event.requestedState, "WA");
+  assert.match(unavailable.event.narration, /already assigned/i);
 });
 
 test("four colors produce a complete coloring with no adjacent conflicts", () => {
@@ -131,20 +174,23 @@ test("a forced singleton that conflicts is rejected immediately", () => {
     (snapshot, index) =>
       index > 0 &&
       snapshot.event.type === "contradiction" &&
-      snapshot.event.state === "OH" &&
-      snapshot.event.causeState === "IN" &&
       trace[index - 1].event.type === "remove-color" &&
-      trace[index - 1].event.state === "OH" &&
+      trace[index - 1].event.state === snapshot.event.state &&
       trace[index - 1].event.nextDomain?.length === 1,
   );
 
-  assert.ok(contradictionIndex > 0, "expected the IN/OH forced-color conflict");
+  assert.ok(contradictionIndex > 0, "expected a forced-color neighbor conflict");
   const before = trace[contradictionIndex - 1];
   const contradiction = trace[contradictionIndex];
   assert.equal(before.event.type, "remove-color");
   assert.equal(contradiction.event.type, "contradiction");
-  assert.equal(contradiction.assignments.OH, undefined);
-  assert.equal(contradiction.assignments.IN, contradiction.event.colorId);
+  const conflictedState = contradiction.event.state as StateCode;
+  const causeState = contradiction.event.causeState as StateCode;
+  assert.equal(contradiction.assignments[conflictedState], undefined);
+  assert.equal(
+    contradiction.assignments[causeState],
+    contradiction.event.colorId,
+  );
   assert.ok(
     BigInt(contradiction.outcomes.remaining) <
       BigInt(before.outcomes.remaining),
@@ -194,7 +240,7 @@ test("search-tree decisions expose pruned, rejected, and solution color branches
 test("outcome space starts at 4^50 and only shrinks as outcomes are disproved", () => {
   const trace = generateTrace(FOUR_COLORS);
   const expectedTotal = BigInt(4) ** BigInt(50);
-  const expectedFirstReduction = BigInt(4) ** BigInt(47);
+  const expectedFirstReduction = BigInt(4) ** BigInt(48);
   const firstReduction = trace.find(
     (snapshot) => snapshot.event.type === "remove-color",
   )!;
@@ -392,5 +438,26 @@ test("snapshots are immutable and palette validation rejects ambiguous ids", () 
   assert.throws(
     () => generateTrace(["red"], { maxColorAttempts: 0 }),
     /positive integer/i,
+  );
+  assert.throws(
+    () => generateTrace(["red"], {
+      traversalDirection: "sideways" as "top-down",
+    }),
+    /top-down or bottom-up/i,
+  );
+  assert.throws(
+    () => generateTrace(["red"], {
+      learnerInterventions: [{ decisionIndex: -1, state: "WA" }],
+    }),
+    /non-negative integers/i,
+  );
+  assert.throws(
+    () => generateTrace(["red"], {
+      learnerInterventions: [
+        { decisionIndex: 0, state: "WA" },
+        { decisionIndex: 0, state: "OR" },
+      ],
+    }),
+    /only one learner intervention/i,
   );
 });

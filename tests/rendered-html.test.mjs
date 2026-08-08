@@ -46,6 +46,13 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /log scale/);
   assert.match(html, /Propagation<\/span><strong>ON<\/strong><small>Ready/);
   assert.match(html, /Constraint propagation/);
+  assert.match(html, /Search setup/);
+  assert.match(html, /State order/);
+  assert.match(html, /Top down/);
+  assert.match(html, /Bottom up/);
+  assert.match(html, /Human guidance/);
+  assert.match(html, /Select a state for the solver to rethink/);
+  assert.match(html, /Select a state first/);
   assert.match(html, /Branching search history/);
   assert.match(html, /DFS tree/);
   assert.match(html, /rejected \/ pruned/);
@@ -85,6 +92,8 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(labSource, /className="tree-branches"/);
   assert.match(labSource, /className="tree-child-decisions"/);
+  assert.match(labSource, /guideNextDecision/);
+  assert.match(labSource, /learnerInterventions/);
   assert.match(labSource, /viewport\.scrollTop = Math\.max/);
   assert.match(labSource, /viewport\.scrollLeft = Math\.max/);
   assert.match(

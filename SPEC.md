@@ -16,6 +16,7 @@ After using the page, a learner should be able to explain:
 4. Depth-first search explores one branch at a time and backtracks when a domain becomes empty.
 5. The number of available colors changes whether a valid coloring exists and how much search is required.
 6. Constraint propagation can eliminate entire families of complete assignments before depth-first search visits them.
+7. Variable order changes the shape of a depth-first search, and a human can deliberately redirect one decision without making the solver random.
 
 ## 3. Audience and tone
 
@@ -32,7 +33,8 @@ After using the page, a learner should be able to explain:
 - **Propagation:** after a tentative assignment, remove that color from every unassigned neighbor. Continue through the resulting forced assignments until stable or until a domain is empty.
 - **Immediate conflict invariant:** before emitting any later assignment event, validate every explicit or forced assignment against all already assigned neighbors. An equal-colored adjacent pair must produce the contradiction immediately; it may never remain visible while unrelated states are assigned.
 - **Comparison mode:** the learner can turn constraint propagation on or off. Both modes use the same variable ordering, value ordering, palette, and validity checks so the visible difference in search work is attributable to propagation. Changing modes resets to the deterministic start of the corresponding trace.
-- **Variable ordering:** minimum remaining values (smallest domain first), with state abbreviation as the stable tie-breaker. The optional details sidebar must name this rule.
+- **Variable ordering:** explicit DFS choices follow a learner-selected geographic scan of the displayed map: top-to-bottom or bottom-to-top, with stable horizontal ordering inside each row. Propagation may assign states ahead of the scan. The optional details sidebar must name the active rule.
+- **Human guidance:** selecting a state remains inspection-only. A separate “Rethink this state next” action may replace exactly one upcoming explicit DFS variable choice if that state is still unassigned. The intervention is recorded in the trace, deterministic replay preserves it, and the geographic scan resumes immediately afterward. If propagation assigns the requested state before that decision, the trace explains why the request was skipped.
 - **Value ordering:** palette order, left to right, so a reset followed by Run always produces the same trace.
 - **Remaining search space:** the exact number of complete assignments of colors to all 50 states that have not yet been eliminated by constraints or search evidence. With `k` available colors, a fresh run starts at `k^50`; this is an outcome-space measure, not a count of future solver events or an estimate of runtime.
 - **Completion states:** solved, unsatisfiable for the selected palette, paused, or ready.
@@ -61,7 +63,7 @@ The primary viewport should prioritize the map, not generic dashboard chrome.
   - if the palette is too large to fit, the map shows the first dots plus a `+N` indicator while the state inspector shows the complete domain.
 - The currently selected state has a high-contrast focus ring.
 - The state being tried, affected neighbors, forced states, and contradicted state use distinct, redundant treatments (color plus outline/icon/label), not color alone.
-- Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver.
+- Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver. An adjacent, explicit guidance action is required to alter the next choice.
 - Hover/focus reveals the state name, assigned value, full domain, and land-border neighbors.
 - An actual branching depth-first-search tree sits directly below the map at every viewport width. Decision nodes connect to separate color-option branches and then to their descendant decisions, so the structure cannot collapse into a flat path ledger. The tree lives in a limited-height pane that scrolls in both directions and automatically follows the deepest active branch as the trace advances. The map and tree advance from the same snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
 - Each tree decision shows its color candidates in palette order. Tried candidates retain their outcome; rejected or pruned candidates are visibly crossed out with a text/icon cue, and the active candidate is highlighted without relying on color alone.
@@ -77,6 +79,8 @@ The controls remain close to the map and are usable on touch screens.
 - **Reset**: returns to all states unassigned with full domains.
 - **Speed slider**: labeled from “Explain” to “Fast,” with the current interval expressed accessibly. Speed changes take effect during a run.
 - **Constraint propagation switch**: toggles propagation on/off, clearly labels the active mode, and regenerates the deterministic trace from the start for an honest comparison.
+- **State-order switch**: chooses a top-to-bottom or bottom-to-top geographic scan. Changing direction pauses and resets the trace so the new ordering is unambiguous.
+- **Human guidance**: after selecting an unassigned state, “Rethink [state] next” pauses playback and deterministically replaces the next explicit variable choice. A queued request can be canceled before it is applied; selection alone never changes search behavior.
 - **Palette control**: add or remove colors dynamically. Start with four visually distinct, color-vision-friendly colors. The engine accepts any palette length; the interface warns that very large palettes are visually compressed rather than changing solver semantics.
 - **Preset buttons**: “Try 3 colors,” “Classic 4,” and “Show a backtrack” provide quick teaching entry points. A preset may set palette and deterministic starting conditions, but must use the same solver rather than a prerecorded fake animation.
 - **Sticky monitor strip**: a compact strip remains visible while the learner uses the map or scrolls. It always shows the remaining search space, solver status, active propagation mode, and current playback speed. The speed value remains visible even when its slider is not.
@@ -91,7 +95,7 @@ Rich explanation and inspection tools live in a sidebar that is collapsed by def
 - One-sentence cause and effect, for example “Colorado borders Utah, so coral is removed from Utah’s options.”
 - Formal annotation underneath, for example `UT domain: {coral, blue, gold} → {blue, gold}`.
 - A compact legend explaining assigned, current, affected, forced, and contradiction states.
-- A “Why this state?” disclosure explaining minimum remaining values and the tie-breaker.
+- A “Why this state?” disclosure explaining the active geographic direction, propagation assignments that occur ahead of the scan, and any one-decision human override.
 - A selected-state inspector with the state name, assignment, complete domain, neighbor list, and which neighbors removed which colors.
 
 ### 5.5 Search and progress panel
@@ -177,6 +181,7 @@ The first version is complete when:
 12. A learner can switch constraint propagation on/off and compare the same exact remaining-search-space metric, which starts at `k^50`, never increases, and does not decrease merely because a branch is tried.
 13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
 14. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible while the default-collapsed details sidebar allows the main map-and-tree area to expand.
+15. Explicit DFS choices visibly follow the selected top-down or bottom-up map order, and a learner can redirect exactly one upcoming choice by selecting an unassigned state and invoking the separate rethink action.
 
 ## 12. Out of scope for the first version
 

@@ -9,6 +9,15 @@ export type SolverStatus =
   | "unsatisfiable"
   | "limit-reached";
 
+export type TraversalDirection = "top-down" | "bottom-up";
+
+export interface LearnerIntervention {
+  /** Zero-based DFS variable-selection ordinal to replace. */
+  readonly decisionIndex: number;
+  /** State the learner wants the search to reconsider at that decision. */
+  readonly state: StateCode;
+}
+
 export type SolverEventType =
   | "ready"
   | "select-variable"
@@ -35,6 +44,8 @@ export interface SolverEvent {
   readonly colorId?: string;
   readonly previousDomain?: readonly string[];
   readonly nextDomain?: readonly string[];
+  readonly selectionReason?: "direction" | "learner" | "learner-unavailable";
+  readonly requestedState?: StateCode;
 }
 
 export interface SearchFrame {
@@ -67,7 +78,7 @@ export interface SearchTreeOption {
 }
 
 /**
- * One MRV variable choice in the DFS tree. `parentBranchId` connects this
+ * One explicit variable choice in the DFS tree. `parentBranchId` connects this
  * choice to the color-attempt option that led to it. Options omitted from the
  * variable's current domain are included as `pruned`, making propagation's
  * avoided branches visible rather than silently dropping them.
@@ -135,6 +146,10 @@ export interface TraceSnapshot {
 export interface GenerateTraceOptions {
   /** Enable domain reduction and automatic singleton assignment. Default true. */
   readonly propagationEnabled?: boolean;
+  /** Geographic direction used for explicit DFS variable choices. Default top-down. */
+  readonly traversalDirection?: TraversalDirection;
+  /** Deterministic one-time learner overrides keyed to DFS decision ordinals. */
+  readonly learnerInterventions?: readonly LearnerIntervention[];
   /**
    * Maximum retained snapshots. Search still runs after this cap and the
    * terminal snapshot is always retained.
@@ -193,9 +208,28 @@ const DEFAULT_MAX_SNAPSHOTS = 30_000;
 const DEFAULT_MAX_SNAPSHOTS_WITHOUT_PROPAGATION = 300;
 const DEFAULT_MAX_COLOR_ATTEMPTS = 25_000;
 const SEARCH_TREE_RECENT_WINDOW = 18;
-const STATE_CODES_BY_ABBREVIATION = Object.freeze(
-  [...STATE_CODES].sort((left, right) => left.localeCompare(right)),
-);
+
+/**
+ * State-label order on the displayed map, scanning from top to bottom and
+ * left to right. Alaska and Hawaii follow the same rule in their visible
+ * insets. Bottom-up reverses vertical order while keeping row ties left to
+ * right.
+ */
+export const STATE_CODES_TOP_DOWN: readonly StateCode[] = Object.freeze([
+  "WA", "ME", "MT", "ND", "NH", "OR", "MN", "VT", "ID", "MA",
+  "WI", "SD", "NY", "MI", "WY", "RI", "CT", "PA", "IA", "NE",
+  "NJ", "OH", "NV", "IN", "IL", "DE", "UT", "WV", "MD", "CO",
+  "CA", "MO", "KS", "VA", "KY", "TN", "NC", "OK", "AZ", "NM",
+  "AR", "SC", "GA", "MS", "AL", "LA", "TX", "FL", "AK", "HI",
+]);
+
+export const STATE_CODES_BOTTOM_UP: readonly StateCode[] = Object.freeze([
+  "HI", "AK", "FL", "TX", "LA", "MS", "AL", "GA", "SC", "AR",
+  "NM", "AZ", "OK", "NC", "TN", "KY", "KS", "VA", "MO", "CA",
+  "CO", "MD", "WV", "UT", "DE", "IL", "NV", "IN", "OH", "NJ",
+  "NE", "IA", "PA", "CT", "WY", "RI", "MI", "NY", "SD", "WI",
+  "MA", "ID", "VT", "OR", "MN", "NH", "MT", "ND", "ME", "WA",
+]);
 
 function formatDomain(domain: readonly string[]): string {
   return `{${domain.join(", ")}}`;
@@ -360,10 +394,12 @@ function freezeSearchTree(
  * Generate a deterministic teaching trace for a palette.
  *
  * The returned value and every nested snapshot collection are frozen. Both
- * modes use MRV, state-code tie-breaking, palette-order values, and depth-first
- * backtracking. With propagation enabled, assignment also reduces neighboring
- * domains and forces singletons. With it disabled, every color attempt is
- * checked directly against already assigned neighbors.
+ * modes use a geographic scan, palette-order values, and depth-first
+ * backtracking. Learner interventions may replace individual variable choices;
+ * deterministic scanning resumes immediately afterward. With propagation
+ * enabled, assignment also reduces neighboring domains and forces singletons.
+ * With it disabled, every color attempt is checked directly against already
+ * assigned neighbors.
  */
 export function generateTrace(
   colorIds: readonly string[],
@@ -371,6 +407,33 @@ export function generateTrace(
 ): readonly TraceSnapshot[] {
   validatePalette(colorIds);
   const propagationEnabled = options.propagationEnabled ?? true;
+  const traversalDirection = options.traversalDirection ?? "top-down";
+  const learnerInterventions = options.learnerInterventions ?? [];
+  if (
+    traversalDirection !== "top-down" &&
+    traversalDirection !== "bottom-up"
+  ) {
+    throw new RangeError("traversalDirection must be top-down or bottom-up.");
+  }
+  const interventionStates = new Map<number, StateCode>();
+  for (const intervention of learnerInterventions) {
+    if (!Number.isInteger(intervention.decisionIndex) || intervention.decisionIndex < 0) {
+      throw new RangeError("Learner intervention decision indexes must be non-negative integers.");
+    }
+    if (!(STATE_CODES as readonly string[]).includes(intervention.state)) {
+      throw new RangeError(`Learner intervention state must be one of the 50 states: ${intervention.state}`);
+    }
+    if (interventionStates.has(intervention.decisionIndex)) {
+      throw new RangeError(`Only one learner intervention is allowed at decision ${intervention.decisionIndex}.`);
+    }
+    interventionStates.set(intervention.decisionIndex, intervention.state);
+  }
+  const stateScanOrder = traversalDirection === "top-down"
+    ? STATE_CODES_TOP_DOWN
+    : STATE_CODES_BOTTOM_UP;
+  const directionLabel = traversalDirection === "top-down"
+    ? "top to bottom"
+    : "bottom to top";
   const requestedCap =
     options.maxSnapshots ??
     (propagationEnabled
@@ -407,6 +470,7 @@ export function generateTrace(
   const treeDecisionIndexes = new Map<string, number>();
   let nextDecisionId = 1;
   let nextBranchId = 1;
+  let variableSelectionIndex = 0;
 
   const eliminateOutcomes = (count: bigint): void => {
     if (count < BigInt(0) || count > remainingOutcomeCount) {
@@ -525,8 +589,8 @@ export function generateTrace(
     event: {
       type: "ready",
       title: "The map is ready",
-      narration: `${STATE_CODES.length} states begin with ${colorIds.length} color${colorIds.length === 1 ? "" : "s"} in each domain. Constraint propagation is ${propagationEnabled ? "on" : "off"}.`,
-      formal: `All domains = ${formatDomain(colorIds)}; propagation = ${propagationEnabled ? "on" : "off"}`,
+      narration: `${STATE_CODES.length} states begin with ${colorIds.length} color${colorIds.length === 1 ? "" : "s"} in each domain. Constraint propagation is ${propagationEnabled ? "on" : "off"}; explicit choices scan ${directionLabel}.`,
+      formal: `All domains = ${formatDomain(colorIds)}; propagation = ${propagationEnabled ? "on" : "off"}; traversal = ${traversalDirection}`,
     },
   });
 
@@ -563,18 +627,30 @@ export function generateTrace(
     return finalizeSnapshots();
   }
 
-  const chooseVariable = (state: WorkingState): StateCode | undefined => {
-    let selected: StateCode | undefined;
-    let smallestDomain = Number.POSITIVE_INFINITY;
-    for (const code of STATE_CODES_BY_ABBREVIATION) {
-      if (state.assignments[code] !== undefined) continue;
-      const domainSize = state.domains[code].length;
-      if (domainSize < smallestDomain) {
-        selected = code;
-        smallestDomain = domainSize;
-      }
+  const chooseVariable = (
+    state: WorkingState,
+  ): {
+    state: StateCode;
+    reason: "direction" | "learner" | "learner-unavailable";
+    requestedState?: StateCode;
+  } | undefined => {
+    const decisionIndex = variableSelectionIndex;
+    variableSelectionIndex += 1;
+    const requestedState = interventionStates.get(decisionIndex);
+    if (
+      requestedState !== undefined &&
+      state.assignments[requestedState] === undefined
+    ) {
+      return { state: requestedState, reason: "learner", requestedState };
     }
-    return selected;
+
+    for (const code of stateScanOrder) {
+      if (state.assignments[code] !== undefined) continue;
+      return requestedState
+        ? { state: code, reason: "learner-unavailable", requestedState }
+        : { state: code, reason: "direction" };
+    }
+    return undefined;
   };
 
   const findAssignedConflict = (
@@ -743,8 +819,8 @@ export function generateTrace(
     state: WorkingState,
     stack: readonly SearchFrame[],
   ): WorkingState | undefined => {
-    const variable = chooseVariable(state);
-    if (variable === undefined) {
+    const selection = chooseVariable(state);
+    if (selection === undefined) {
       markSolutionPath(stack);
       emit(
         state,
@@ -763,6 +839,8 @@ export function generateTrace(
       return state;
     }
 
+    const variable = selection.state;
+
     const candidates = [...state.domains[variable]];
     const decisionId = addTreeDecision(variable, candidates, stack);
     emit(state, stack, {
@@ -771,9 +849,19 @@ export function generateTrace(
       event: {
         type: "select-variable",
         title: `${STATE_NAMES[variable]} is selected next`,
-        narration: `${STATE_NAMES[variable]} has the fewest remaining colors; abbreviation breaks any tie.`,
-        formal: `MRV selects ${variable} with domain ${formatDomain(candidates)}`,
+        narration: selection.reason === "learner"
+          ? `Human guidance asks the search to rethink ${STATE_NAMES[variable]} now. The ${directionLabel} scan resumes after this decision.`
+          : selection.reason === "learner-unavailable" && selection.requestedState
+            ? `Human guidance requested ${STATE_NAMES[selection.requestedState]}, but propagation already assigned it. Search continues ${directionLabel} with ${STATE_NAMES[variable]}.`
+            : `${STATE_NAMES[variable]} is the next unassigned state in the ${directionLabel} scan.`,
+        formal: selection.reason === "learner"
+          ? `Human guidance selects ${variable} with domain ${formatDomain(candidates)}`
+          : selection.reason === "learner-unavailable" && selection.requestedState
+            ? `Requested ${selection.requestedState} unavailable; ${traversalDirection} selects ${variable}`
+            : `${traversalDirection} selects ${variable} with domain ${formatDomain(candidates)}`,
         state: variable,
+        selectionReason: selection.reason,
+        requestedState: selection.requestedState,
         previousDomain: candidates,
         nextDomain: candidates,
       },

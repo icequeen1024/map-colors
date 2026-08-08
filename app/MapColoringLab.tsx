@@ -6,9 +6,11 @@ import {
   STATE_CODES,
   STATE_NAMES,
   generateTrace,
+  type LearnerIntervention,
   type SearchTreeDecision,
   type SearchTreeOption,
   type StateCode,
+  type TraversalDirection,
 } from "@/lib/solver";
 import { USMap } from "./components/USMap";
 import "./map-coloring-lab.css";
@@ -325,14 +327,22 @@ export function MapColoringLab() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [propagationEnabled, setPropagationEnabled] = useState(true);
+  const [traversalDirection, setTraversalDirection] =
+    useState<TraversalDirection>("top-down");
+  const [learnerInterventions, setLearnerInterventions] =
+    useState<LearnerIntervention[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedState, setSelectedState] = useState<StateCode | null>(null);
   const [stateQuery, setStateQuery] = useState("");
   const colorSequence = useRef(STARTER_PALETTE.length);
 
   const trace = useMemo(
-    () => generateTrace(palette.map((color) => color.id), { propagationEnabled }),
-    [palette, propagationEnabled],
+    () => generateTrace(palette.map((color) => color.id), {
+      propagationEnabled,
+      traversalDirection,
+      learnerInterventions,
+    }),
+    [learnerInterventions, palette, propagationEnabled, traversalDirection],
   );
   const snapshot = trace[cursor] ?? trace[0];
   const atEnd = cursor >= trace.length - 1;
@@ -362,6 +372,16 @@ export function MapColoringLab() {
   const chosenState = selectedState ?? snapshot?.currentState ?? snapshot?.event.state ?? null;
   const selectedDomain = chosenState ? snapshot?.domains[chosenState] ?? [] : [];
   const selectedAssignment = chosenState ? snapshot?.assignments[chosenState] : undefined;
+  const selectionCountAtCursor = useMemo(
+    () => trace
+      .slice(0, cursor + 1)
+      .filter((item) => item.event.type === "select-variable")
+      .length,
+    [cursor, trace],
+  );
+  const pendingIntervention = learnerInterventions.find(
+    (intervention) => intervention.decisionIndex === selectionCountAtCursor,
+  );
   const removalNotes = useMemo(() => {
     if (!chosenState) return [];
     const notes: string[] = [];
@@ -408,6 +428,7 @@ export function MapColoringLab() {
     setPlaying(false);
     setCursor(0);
     setSelectedState(null);
+    setLearnerInterventions([]);
     setPalette(nextPalette);
   }
 
@@ -416,7 +437,41 @@ export function MapColoringLab() {
     setPlaying(false);
     setCursor(0);
     setSelectedState(null);
+    setLearnerInterventions([]);
     setPropagationEnabled(enabled);
+  }
+
+  function chooseTraversalDirection(direction: TraversalDirection) {
+    if (direction === traversalDirection) return;
+    setPlaying(false);
+    setCursor(0);
+    setSelectedState(null);
+    setLearnerInterventions([]);
+    setTraversalDirection(direction);
+  }
+
+  function guideNextDecision() {
+    if (
+      !selectedState ||
+      snapshot.assignments[selectedState] !== undefined ||
+      snapshot.domains[selectedState].length === 0 ||
+      terminal
+    ) return;
+
+    setPlaying(false);
+    setLearnerInterventions((current) => [
+      ...current.filter(
+        (intervention) => intervention.decisionIndex < selectionCountAtCursor,
+      ),
+      { decisionIndex: selectionCountAtCursor, state: selectedState },
+    ]);
+  }
+
+  function cancelPendingIntervention() {
+    setPlaying(false);
+    setLearnerInterventions((current) => current.filter(
+      (intervention) => intervention.decisionIndex < selectionCountAtCursor,
+    ));
   }
 
   function addColor() {
@@ -439,6 +494,10 @@ export function MapColoringLab() {
   }
 
   const assignmentCount = Object.keys(snapshot?.assignments ?? {}).length;
+  const selectedCanGuide = selectedState !== null &&
+    snapshot.assignments[selectedState] === undefined &&
+    snapshot.domains[selectedState].length > 0 &&
+    !terminal;
   const event = snapshot.event;
   const eventTitle = teachingTitle(event, palette);
   const remainingOutcomes = formatOutcomeCount(snapshot.outcomes.remaining);
@@ -618,29 +677,52 @@ export function MapColoringLab() {
           <section className="comparison-board configuration-mode" aria-labelledby="mode-heading">
             <div className="configuration-title">
               <p className="kicker">Lesson setup</p>
-              <h2 id="mode-heading">Propagation mode</h2>
+              <h2 id="mode-heading">Search setup</h2>
             </div>
-            <fieldset className="propagation-switch compact-switch">
-              <legend>Constraint propagation</legend>
-              <div>
-                <button
-                  type="button"
-                  aria-pressed={propagationEnabled}
-                  onClick={() => choosePropagationMode(true)}
-                >
-                  <b>ON</b>
-                  <span>Prune early</span>
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!propagationEnabled}
-                  onClick={() => choosePropagationMode(false)}
-                >
-                  <b>OFF</b>
-                  <span>Check when tried</span>
-                </button>
-              </div>
-            </fieldset>
+            <div className="configuration-switches">
+              <fieldset className="propagation-switch compact-switch">
+                <legend>Constraint propagation</legend>
+                <div>
+                  <button
+                    type="button"
+                    aria-pressed={propagationEnabled}
+                    onClick={() => choosePropagationMode(true)}
+                  >
+                    <b>ON</b>
+                    <span>Prune early</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!propagationEnabled}
+                    onClick={() => choosePropagationMode(false)}
+                  >
+                    <b>OFF</b>
+                    <span>Check when tried</span>
+                  </button>
+                </div>
+              </fieldset>
+              <fieldset className="propagation-switch compact-switch direction-switch">
+                <legend>State order</legend>
+                <div>
+                  <button
+                    type="button"
+                    aria-pressed={traversalDirection === "top-down"}
+                    onClick={() => chooseTraversalDirection("top-down")}
+                  >
+                    <b aria-hidden="true">↓</b>
+                    <span>Top down</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={traversalDirection === "bottom-up"}
+                    onClick={() => chooseTraversalDirection("bottom-up")}
+                  >
+                    <b aria-hidden="true">↑</b>
+                    <span>Bottom up</span>
+                  </button>
+                </div>
+              </fieldset>
+            </div>
           </section>
 
           <section className="palette-board" aria-labelledby="palette-heading">
@@ -696,6 +778,48 @@ export function MapColoringLab() {
                 <strong>{assignmentCount} of 50 assigned</strong>
                 <span>Colored count shows progress, not time remaining.</span>
               </p>
+            </div>
+            <div className="human-guidance" role="group" aria-label="Human search guidance">
+              <div>
+                <span>Human guidance</span>
+                <strong>
+                  {pendingIntervention
+                    ? `${STATE_NAMES[pendingIntervention.state]} is queued for the next decision`
+                    : selectedState
+                      ? `${STATE_NAMES[selectedState]} selected`
+                      : "Select a state for the solver to rethink"}
+                </strong>
+                <small>
+                  {pendingIntervention
+                    ? `The ${traversalDirection === "top-down" ? "top-down" : "bottom-up"} scan resumes immediately afterward.`
+                    : selectedState && snapshot.assignments[selectedState] !== undefined
+                      ? "That state is already assigned in this snapshot. Choose an unassigned state."
+                      : selectedState && snapshot.domains[selectedState].length === 0
+                        ? "That state has no available colors in this contradiction. Choose another state."
+                        : "A learner request changes one decision only; selecting a state by itself never changes the search."}
+                </small>
+              </div>
+              <div className="guidance-actions">
+                <button
+                  type="button"
+                  onClick={guideNextDecision}
+                  disabled={!selectedCanGuide || pendingIntervention?.state === selectedState}
+                  aria-label={selectedState
+                    ? `Ask the solver to rethink ${STATE_NAMES[selectedState]} at the next decision`
+                    : "Select a state before asking the solver to rethink it"}
+                >
+                  {selectedState ? `Rethink ${selectedState} next` : "Select a state first"}
+                </button>
+                {pendingIntervention && (
+                  <button
+                    className="quiet-guidance"
+                    type="button"
+                    onClick={cancelPendingIntervention}
+                  >
+                    Cancel request
+                  </button>
+                )}
+              </div>
             </div>
             <div className="map-learning-stage">
               <div className="map-visual">
@@ -793,9 +917,10 @@ export function MapColoringLab() {
             <details className="why-state">
               <summary>Why this state?</summary>
               <p>
-                The search chooses the unassigned state with the fewest remaining colors — the
-                <strong> minimum remaining values</strong> rule. Ties go to the alphabetically first
-                state abbreviation, so every run is repeatable.
+                Explicit choices scan the visible map
+                <strong> {traversalDirection === "top-down" ? "from top to bottom" : "from bottom to top"}</strong>.
+                Propagation may assign states ahead of the scan. A human rethink request overrides
+                one choice, then the same deterministic scan resumes.
               </p>
             </details>
           </section>

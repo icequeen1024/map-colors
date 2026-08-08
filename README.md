@@ -13,7 +13,7 @@ The product behavior and acceptance criteria live in [SPEC.md](./SPEC.md).
 - Empty domains trigger backtracking
 - A palette can be changed without changing the solver implementation
 
-The 50-state graph includes Alaska and Hawaii as isolated states and omits the District of Columbia. Search is deterministic: it uses minimum remaining values with state abbreviation as the tie-breaker, then tries colors in palette order.
+The 50-state graph includes Alaska and Hawaii as isolated states and omits the District of Columbia. Search is deterministic: explicit DFS choices scan the displayed map from top to bottom or bottom to top, then try colors in palette order. Constraint propagation may assign states ahead of that scan.
 
 ## Controls
 
@@ -23,6 +23,8 @@ The 50-state graph includes Alaska and Hawaii as isolated states and omits the D
 - **Reset** restores every domain.
 - **Speed** changes playback timing without changing the trace.
 - **Constraint propagation ON/OFF** resets and reruns the same deterministic search so its workload can be compared fairly.
+- **State order** switches between top-down and bottom-up map scans.
+- **Human guidance** lets a learner select an unassigned state and ask the solver to rethink it at the next explicit decision. The request changes one choice only, then the selected map order resumes.
 - **Palette controls** add or remove colors and regenerate the trace.
 - **Presets** provide quick ways to compare constrained and unconstrained searches.
 
