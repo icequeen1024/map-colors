@@ -146,6 +146,8 @@ const STATE_GEOMETRY: readonly StateGeometry[] = [
 const normalizeCode = (value: string | null | undefined) =>
   value?.trim().toUpperCase() ?? "";
 
+const mapAssetPath = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/map/us-states.svg`;
+
 function lookup<T>(
   values: Readonly<Partial<Record<string, T | undefined>>>,
   code: StateCode,
@@ -259,6 +261,7 @@ export function USMap({
             ...statusText,
             "Press Enter to inspect",
           ].filter(Boolean).join(". ");
+          const shapeHref = `${mapAssetPath}#${code}`;
 
           return (
             <g
@@ -275,14 +278,14 @@ export function USMap({
               <title>{[name, assignmentText, domainText, neighborText].filter(Boolean).join(" · ")}</title>
               <use
                 className="usMap__shape"
-                href={`/map/us-states.svg#${code}`}
+                href={shapeHref}
                 style={{ fill: assignment?.hex ?? (assignmentId ? "#9a958c" : "#fbf8ef") }}
               />
-              {isSelected && <use className="usMap__outline usMap__outline--selected" href={`/map/us-states.svg#${code}`} />}
-              {isCurrent && <use className="usMap__outline usMap__outline--current" href={`/map/us-states.svg#${code}`} />}
-              {isAffected && <use className="usMap__outline usMap__outline--affected" href={`/map/us-states.svg#${code}`} />}
-              {isForced && <use className="usMap__outline usMap__outline--forced" href={`/map/us-states.svg#${code}`} />}
-              {isContradicted && <use className="usMap__outline usMap__outline--contradiction" href={`/map/us-states.svg#${code}`} />}
+              {isSelected && <use className="usMap__outline usMap__outline--selected" href={shapeHref} />}
+              {isCurrent && <use className="usMap__outline usMap__outline--current" href={shapeHref} />}
+              {isAffected && <use className="usMap__outline usMap__outline--affected" href={shapeHref} />}
+              {isForced && <use className="usMap__outline usMap__outline--forced" href={shapeHref} />}
+              {isContradicted && <use className="usMap__outline usMap__outline--contradiction" href={shapeHref} />}
 
               {leader && (
                 <line className="usMap__leader" x1={leader[0]} y1={leader[1]} x2={x} y2={y - 2} />

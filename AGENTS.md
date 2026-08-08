@@ -25,6 +25,8 @@ Ask before making a choice that would materially change product behavior, archit
 
 For this project, use `npm test` for the solver/data/render suite, `npm run lint` for static checks, and `npm run build` for the production vinext build. Start the local lesson with `npm run dev`.
 
+Production hosting uses GitHub Pages. `.github/workflows/deploy-pages.yml` runs `npm run build:pages` with `PAGES_BASE_PATH=/map-colors`, validates the artifact with `npm run test:pages`, and deploys `dist/client`. Keep local development unprefixed. Do not add `.openai/hosting.json` or the former Sites packaging/plugin integration back to the repository.
+
 ## Git and GitHub Delivery
 
 Completed repository changes, including documentation-only changes, must be committed and pushed to GitHub before the task is considered complete.

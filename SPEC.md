@@ -15,6 +15,7 @@ After using the page, a learner should be able to explain:
 3. Propagation can force assignments or reveal a contradiction before the entire map is colored.
 4. Depth-first search explores one branch at a time and backtracks when a domain becomes empty.
 5. The number of available colors changes whether a valid coloring exists and how much search is required.
+6. Constraint propagation reduces the amount of depth-first-search work compared with checking constraints only after choosing a color.
 
 ## 3. Audience and tone
 
@@ -29,6 +30,7 @@ After using the page, a learner should be able to explain:
 - **Constraints:** states that share a land boundary must have different assigned colors. Corner-only contact does not count. Alaska and Hawaii have no graph edges.
 - **Search:** deterministic depth-first backtracking search.
 - **Propagation:** after a tentative assignment, remove that color from every unassigned neighbor. Continue through the resulting forced assignments until stable or until a domain is empty.
+- **Comparison mode:** the learner can turn constraint propagation on or off. Both modes use the same variable ordering, value ordering, palette, and validity checks so the visible difference in search work is attributable to propagation. Changing modes resets to the deterministic start of the corresponding trace.
 - **Variable ordering:** minimum remaining values (smallest domain first), with state abbreviation as the stable tie-breaker. The explanation panel must name this rule.
 - **Value ordering:** palette order, left to right, so a reset followed by Run always produces the same trace.
 - **Completion states:** solved, unsatisfiable for the selected palette, paused, or ready.
@@ -59,6 +61,9 @@ The primary viewport should prioritize the map, not generic dashboard chrome.
 - The state being tried, affected neighbors, forced states, and contradicted state use distinct, redundant treatments (color plus outline/icon/label), not color alone.
 - Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver.
 - Hover/focus reveals the state name, assigned value, full domain, and land-border neighbors.
+- A depth-first-search tree sits directly beside the map on wide screens and immediately below it on smaller screens. The map and tree advance from the same trace snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
+- Each tree decision shows its color candidates in palette order. Tried candidates retain their outcome; rejected or pruned candidates are visibly crossed out with a text/icon cue, and the active candidate is highlighted without relying on color alone.
+- The tree may window or summarize older branches to remain readable, but it must preserve the active root-to-leaf path and the most recent abandoned branch.
 
 ### 5.3 Control bar
 
@@ -69,6 +74,7 @@ The controls remain close to the map and are usable on touch screens.
 - **Back one step**: returns to the preceding recorded event for explanation and inspection; resuming from there continues deterministically.
 - **Reset**: returns to all states unassigned with full domains.
 - **Speed slider**: labeled from “Explain” to “Fast,” with the current interval expressed accessibly. Speed changes take effect during a run.
+- **Constraint propagation switch**: toggles propagation on/off, clearly labels the active mode, and regenerates the deterministic trace from the start for an honest comparison.
 - **Palette control**: add or remove colors dynamically. Start with four visually distinct, color-vision-friendly colors. The engine accepts any palette length; the interface warns that very large palettes are visually compressed rather than changing solver semantics.
 - **Preset buttons**: “Try 3 colors,” “Classic 4,” and “Show a backtrack” provide quick teaching entry points. A preset may set palette and deterministic starting conditions, but must use the same solver rather than a prerecorded fake animation.
 
@@ -87,9 +93,12 @@ A persistent panel translates the current event into plain language.
 
 ### 5.5 Search and progress panel
 
-- A visible depth-first search stack, newest decision first, showing state abbreviation and attempted color.
-- Backtracked frames remain briefly visible as struck-through or dimmed entries so the learner sees the branch being abandoned.
+- The visible DFS tree is the primary search view; a compact active-path summary may supplement it when useful.
+- Backtracked branches and rejected color candidates remain visible as struck-through or dimmed entries so the learner sees exactly what was abandoned.
 - Counters for assignments, domain reductions, backtracks, and search depth.
+- A prominent **color attempts remaining** number reports how many `try-color` events remain after the current snapshot in the selected deterministic trace. It is calculated with the same definition in propagation-on and propagation-off modes, includes the current attempt only until that event is passed, and reaches zero at terminal state. The UI must not call this “solutions remaining,” because untried branches are attempts rather than guaranteed solutions.
+- A fixed color-attempt safety cap prevents intentionally difficult propagation-off runs from freezing the browser. If the cap is reached, the terminal state must say that the comparison stopped before exhausting the search; zero remaining then refers only to the generated capped trace, not proof of unsatisfiability.
+- The active propagation mode appears beside the remaining-work number so screenshots or classroom A/B demonstrations cannot be misread.
 - Progress text that describes algorithm status; do not imply that percentage of colored states predicts remaining runtime.
 - A scrollable event history with short entries. Clicking a history entry inspects that snapshot without mutating the run until the user deliberately resumes from it.
 
@@ -139,6 +148,7 @@ A persistent panel translates the current event into plain language.
 - Keep map adjacency data explicit and testable. Add a validation test that every referenced state exists and every adjacency is symmetric.
 - Solver tests must cover propagation, forced assignments, contradictions, deterministic stepping, backtracking, successful coloring, and unsatisfiable palettes.
 - Component/render tests should verify the primary teaching labels and controls.
+- Production output is a static export deployed through GitHub Pages for the repository. Asset URLs must honor the repository base path, and the project must not be created or deployed in ChatGPT Sites.
 
 ## 11. Acceptance criteria
 
@@ -154,6 +164,9 @@ The first version is complete when:
 8. The experience works with keyboard-only navigation, reduced motion, and small screens.
 9. Automated tests and the production build pass.
 10. Starter copy, starter preview code, and unused starter-only dependencies are removed; repository documentation describes the finished product and its commands.
+11. The DFS tree is adjacent to the map at wide widths, remains synchronized with playback, and crosses out rejected/pruned color candidates.
+12. A learner can switch constraint propagation on/off and compare the consistently defined color-attempts-remaining number.
+13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
 
 ## 12. Out of scope for the first version
 

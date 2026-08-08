@@ -6,6 +6,8 @@ import {
   STATE_CODES,
   STATE_NAMES,
   generateTrace,
+  type SearchTreeDecision,
+  type SearchTreeOption,
   type StateCode,
 } from "@/lib/solver";
 import { USMap } from "./components/USMap";
@@ -59,7 +61,7 @@ function paletteText(text: string, palette: PaletteColor[]) {
 }
 
 function eventTone(type: string) {
-  if (type === "contradiction" || type === "unsatisfiable") return "danger";
+  if (type === "contradiction" || type === "unsatisfiable" || type === "limit-reached") return "danger";
   if (type === "solved") return "success";
   if (type === "backtrack") return "backtrack";
   if (type === "remove-color" || type === "forced-assignment") return "change";
@@ -78,22 +80,157 @@ function makeExtraColor(index: number): PaletteColor {
   };
 }
 
+function optionStatusLabel(option: SearchTreeOption) {
+  if (option.status === "pruned") return "pruned by a constraint";
+  if (option.status === "rejected") {
+    if (option.rejectionReason === "contradiction") return "rejected after a contradiction";
+    if (option.rejectionReason === "constraint") return "rejected by a neighbor constraint";
+    return "rejected after the branch was exhausted";
+  }
+  if (option.status === "active") return "active branch";
+  if (option.status === "solution") return "part of the solution";
+  return "not tried yet";
+}
+
+function optionMark(status: SearchTreeOption["status"]) {
+  if (status === "pruned" || status === "rejected") return "×";
+  if (status === "solution") return "✓";
+  if (status === "active") return "→";
+  return "·";
+}
+
+function DFSTree({
+  decisions,
+  palette,
+}: {
+  decisions: readonly SearchTreeDecision[];
+  palette: readonly PaletteColor[];
+}) {
+  const treeRef = useRef<HTMLElement>(null);
+  const { roots, childrenByBranch, visibleIds } = useMemo(() => {
+    const children = new Map<string, SearchTreeDecision[]>();
+    for (const decision of decisions) {
+      if (decision.parentBranchId) {
+        const branchChildren = children.get(decision.parentBranchId) ?? [];
+        branchChildren.push(decision);
+        children.set(decision.parentBranchId, branchChildren);
+      }
+    }
+
+    const visible = new Set(decisions.map((decision) => decision.id));
+
+    return {
+      roots: decisions.filter((decision) => !decision.parentBranchId && visible.has(decision.id)),
+      childrenByBranch: children,
+      visibleIds: visible,
+    };
+  }, [decisions]);
+
+  useEffect(() => {
+    const tree = treeRef.current;
+    const activeOption = tree?.querySelector<HTMLElement>(
+      ".tree-option--active > .tree-option-token, .tree-option--solution > .tree-option-token",
+    );
+    if (!tree || !activeOption) return;
+    const treeBounds = tree.getBoundingClientRect();
+    const optionBounds = activeOption.getBoundingClientRect();
+    if (optionBounds.top < treeBounds.top || optionBounds.bottom > treeBounds.bottom) {
+      tree.scrollTop += optionBounds.top - treeBounds.top - tree.clientHeight / 3;
+    }
+  }, [decisions]);
+
+  function renderDecision(decision: SearchTreeDecision) {
+    const hasLiveOption = decision.options.some(
+      (option) => option.status === "active" || option.status === "solution",
+    );
+    return (
+      <li
+        className={`tree-decision${hasLiveOption ? " is-live" : ""}`}
+        key={decision.id}
+      >
+        <div className="tree-decision-label">
+          <span>D{decision.depth}</span>
+          <strong>{decision.state}</strong>
+          <small>{STATE_NAMES[decision.state]}</small>
+        </div>
+        <ol className="tree-options" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
+          {decision.options.map((option) => {
+            const color = palette.find((item) => item.id === option.colorId);
+            const optionChildren = option.branchId
+              ? (childrenByBranch.get(option.branchId) ?? []).filter((child) =>
+                  visibleIds.has(child.id),
+                )
+              : [];
+            const statusLabel = optionStatusLabel(option);
+            return (
+              <li className={`tree-option tree-option--${option.status}`} key={option.colorId}>
+                <div
+                  className="tree-option-token"
+                  aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                  title={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                >
+                  <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
+                    {color?.symbol ?? "?"}
+                  </i>
+                  <span>{color?.name ?? option.colorId}</span>
+                  <b aria-hidden="true">{optionMark(option.status)}</b>
+                  <small>{statusLabel}</small>
+                </div>
+                {optionChildren.length > 0 && (
+                  <ol className="tree-children">
+                    {optionChildren.map(renderDecision)}
+                  </ol>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </li>
+    );
+  }
+
+  return (
+    <section className="dfs-tree" aria-labelledby="tree-heading" ref={treeRef}>
+      <div className="dfs-tree-heading">
+        <div>
+          <p className="kicker">Branch by branch</p>
+          <h3 id="tree-heading">DFS tree</h3>
+        </div>
+        <span>{decisions.length} visible nodes</span>
+      </div>
+      <div className="tree-key" aria-label="Tree option key">
+        <span><b className="tree-key-live">→</b> exploring</span>
+        <span><b className="tree-key-cut">×</b> rejected / pruned</span>
+      </div>
+      {roots.length > 0 ? (
+        <ol className="tree-roots">{roots.map(renderDecision)}</ol>
+      ) : (
+        <p className="tree-empty">Press Step to reveal the first decision and its color branches.</p>
+      )}
+    </section>
+  );
+}
+
 export function MapColoringLab() {
   const [palette, setPalette] = useState<PaletteColor[]>(STARTER_PALETTE);
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [propagationEnabled, setPropagationEnabled] = useState(true);
   const [selectedState, setSelectedState] = useState<StateCode | null>(null);
   const [stateQuery, setStateQuery] = useState("");
   const colorSequence = useRef(STARTER_PALETTE.length);
 
   const trace = useMemo(
-    () => generateTrace(palette.map((color) => color.id)),
-    [palette],
+    () => generateTrace(palette.map((color) => color.id), { propagationEnabled }),
+    [palette, propagationEnabled],
   );
   const snapshot = trace[cursor] ?? trace[0];
   const atEnd = cursor >= trace.length - 1;
-  const terminal = snapshot?.status === "solved" || snapshot?.status === "unsatisfiable";
+  const terminal =
+    snapshot?.status === "solved" ||
+    snapshot?.status === "unsatisfiable" ||
+    snapshot?.status === "limit-reached";
 
   useEffect(() => {
     if (!playing || atEnd || terminal) return;
@@ -104,7 +241,8 @@ export function MapColoringLab() {
       if (
         nextCursor === trace.length - 1 ||
         nextStatus === "solved" ||
-        nextStatus === "unsatisfiable"
+        nextStatus === "unsatisfiable" ||
+        nextStatus === "limit-reached"
       ) {
         setPlaying(false);
       }
@@ -146,10 +284,10 @@ export function MapColoringLab() {
     if (!snapshot) return "Solver ready.";
     if (speed === SPEEDS.length - 1 && !terminal && cursor % 4 !== 0) return "";
     if (speed === SPEEDS.length - 1 && !terminal) {
-      return `Search update: ${snapshot.metrics.assignments} assignments, ${snapshot.metrics.domainReductions} domain reductions, ${snapshot.metrics.backtracks} backtracks.`;
+      return `Search update with propagation ${propagationEnabled ? "on" : "off"}: ${snapshot.metrics.remainingColorAttempts} color attempts remain, ${snapshot.metrics.assignments} assignments, and ${snapshot.metrics.backtracks} backtracks.`;
     }
     return paletteText(snapshot.event.narration, palette);
-  }, [cursor, palette, snapshot, speed, terminal]);
+  }, [cursor, palette, propagationEnabled, snapshot, speed, terminal]);
 
   function pauseAndMove(nextCursor: number) {
     setPlaying(false);
@@ -161,6 +299,14 @@ export function MapColoringLab() {
     setCursor(0);
     setSelectedState(null);
     setPalette(nextPalette);
+  }
+
+  function choosePropagationMode(enabled: boolean) {
+    if (enabled === propagationEnabled) return;
+    setPlaying(false);
+    setCursor(0);
+    setSelectedState(null);
+    setPropagationEnabled(enabled);
   }
 
   function addColor() {
@@ -191,6 +337,8 @@ export function MapColoringLab() {
       ? "Solved"
       : snapshot.status === "unsatisfiable"
         ? "Unsatisfiable"
+        : snapshot.status === "limit-reached"
+          ? "Safety limit reached"
         : cursor === 0
           ? "Ready"
           : "Paused";
@@ -289,6 +437,59 @@ export function MapColoringLab() {
             </label>
           </section>
 
+          <section className="comparison-board" aria-labelledby="work-heading">
+            <div className="work-readout">
+              <div className="work-heading-row">
+                <div>
+                  <p className="kicker">A precise workload count</p>
+                  <h2 id="work-heading">Color attempts remaining</h2>
+                </div>
+                <span className={`mode-pill mode-pill--${propagationEnabled ? "on" : "off"}`}>
+                  Propagation {propagationEnabled ? "ON" : "OFF"}
+                </span>
+              </div>
+              <output aria-label={`${snapshot.metrics.remainingColorAttempts} color attempts remaining with constraint propagation ${propagationEnabled ? "on" : "off"}`}>
+                {snapshot.metrics.remainingColorAttempts.toLocaleString()}
+              </output>
+              <p>
+                {snapshot.metrics.colorAttempts.toLocaleString()} tried so far · {snapshot.metrics.totalColorAttempts.toLocaleString()} in this deterministic run
+              </p>
+              {snapshot.metrics.omittedEvents > 0 && (
+                <p className="trace-compression-note">
+                  {snapshot.metrics.omittedEvents.toLocaleString()} intermediate teaching events are folded for performance; attempt totals remain exact.
+                </p>
+              )}
+              {snapshot.status === "limit-reached" && (
+                <div className="limit-warning" role="status">
+                  <strong>Comparison stopped at the {snapshot.metrics.colorAttempts.toLocaleString()}-attempt safety limit.</strong>
+                  The search was not exhausted, so zero here does not mean no solution exists.
+                </div>
+              )}
+            </div>
+            <fieldset className="propagation-switch">
+              <legend>Constraint propagation</legend>
+              <div>
+                <button
+                  type="button"
+                  aria-pressed={propagationEnabled}
+                  onClick={() => choosePropagationMode(true)}
+                >
+                  <b>ON</b>
+                  <span>Remove impossible colors early</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={!propagationEnabled}
+                  onClick={() => choosePropagationMode(false)}
+                >
+                  <b>OFF</b>
+                  <span>Reject conflicts only when tried</span>
+                </button>
+              </div>
+              <p>Switch modes to reset the trace and compare the same palette fairly.</p>
+            </fieldset>
+          </section>
+
           <section className="palette-board" aria-labelledby="palette-heading">
             <div className="section-title-row">
               <div>
@@ -343,20 +544,25 @@ export function MapColoringLab() {
                 <span>Colored count shows progress, not time remaining.</span>
               </p>
             </div>
-            {snapshot && (
-              <USMap
-                assignments={snapshot.assignments}
-                domains={snapshot.domains}
-                palette={palette}
-                currentState={snapshot.currentState}
-                affectedState={snapshot.affectedState}
-                selectedState={chosenState}
-                onSelectState={setSelectedState}
-                forcedStates={event.type === "forced-assignment" && event.state ? [event.state] : []}
-                contradictedState={event.type === "contradiction" ? event.state ?? snapshot.affectedState : null}
-                neighbors={ADJACENCY}
-              />
-            )}
+            <div className="map-learning-stage">
+              <div className="map-visual">
+                {snapshot && (
+                  <USMap
+                    assignments={snapshot.assignments}
+                    domains={snapshot.domains}
+                    palette={palette}
+                    currentState={snapshot.currentState}
+                    affectedState={snapshot.affectedState}
+                    selectedState={chosenState}
+                    onSelectState={setSelectedState}
+                    forcedStates={event.type === "forced-assignment" && event.state ? [event.state] : []}
+                    contradictedState={event.type === "contradiction" ? event.state ?? snapshot.affectedState : null}
+                    neighbors={ADJACENCY}
+                  />
+                )}
+              </div>
+              <DFSTree decisions={snapshot.searchTree} palette={palette} />
+            </div>
             <details className="state-finder">
               <summary>Find a state by name</summary>
               <label>
@@ -395,7 +601,7 @@ export function MapColoringLab() {
             <p className="event-number">{playbackStatus} · Event {cursor + 1} of {trace.length}</p>
             <div className="event-heading-row">
               <span className="event-icon" aria-hidden="true">
-                {event.type === "contradiction" ? "!" : event.type === "solved" ? "✓" : "→"}
+                {event.type === "contradiction" || event.type === "limit-reached" ? "!" : event.type === "solved" ? "✓" : "→"}
               </span>
               <div>
                 <p className="kicker">What just happened</p>
@@ -421,6 +627,12 @@ export function MapColoringLab() {
               <div className="contradiction-note" role="status">
                 <strong>Every branch was exhausted.</strong> This palette cannot color the map.
                 Add a color and try again.
+              </div>
+            )}
+            {snapshot?.status === "limit-reached" && (
+              <div className="limit-warning" role="status">
+                <strong>The comparison reached its safety limit.</strong> Search stopped after
+                {snapshot.metrics.colorAttempts.toLocaleString()} color attempts without proving a solution or proving impossibility.
               </div>
             )}
 
@@ -516,6 +728,8 @@ export function MapColoringLab() {
               <div><dt>Reductions</dt><dd>{snapshot?.metrics.domainReductions ?? 0}</dd></div>
               <div><dt>Backtracks</dt><dd>{snapshot?.metrics.backtracks ?? 0}</dd></div>
               <div><dt>Max depth</dt><dd>{snapshot?.metrics.maxSearchDepth ?? 0}</dd></div>
+              <div><dt>Color attempts</dt><dd>{snapshot?.metrics.colorAttempts ?? 0}</dd></div>
+              <div><dt>Attempts left</dt><dd>{snapshot?.metrics.remainingColorAttempts ?? 0}</dd></div>
             </dl>
           </section>
 

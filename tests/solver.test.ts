@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ADJACENCY,
+  REMAINING_WORK_DEFINITION,
   STATE_CODES,
   STATE_NAMES,
   generateTrace,
@@ -105,6 +106,118 @@ test("trace exposes domain reductions and singleton propagation as separate even
   assert.equal(forced.assignments[forced.event.state as StateCode], forced.event.colorId);
 });
 
+test("search-tree decisions expose pruned, rejected, and solution color branches", () => {
+  const solvedTrace = generateTrace(FOUR_COLORS);
+  const prunedSnapshot = solvedTrace.find((snapshot) =>
+    snapshot.searchTree.some((decision) =>
+      decision.options.some((option) => option.status === "pruned"),
+    ),
+  );
+  const solvedOptions = solvedTrace
+    .at(-1)!
+    .searchTree.flatMap((decision) => decision.options)
+    .filter((option) => option.status === "solution");
+
+  assert.ok(prunedSnapshot, "propagated colors should appear as pruned tree options");
+  assert.ok(
+    prunedSnapshot.searchTree.every(
+      (decision) => decision.options.length === FOUR_COLORS.length,
+    ),
+    "each tree decision keeps the complete palette visible",
+  );
+  assert.ok(solvedOptions.length > 0);
+  assert.ok(solvedOptions.every((option) => option.branchId));
+
+  const failedTrace = generateTrace(["red", "blue", "gold"]);
+  const backtrack = failedTrace.find(
+    (snapshot) => snapshot.event.type === "backtrack",
+  );
+  const rejectedBranchId = backtrack?.stack.at(-1)?.branchId;
+  const rejectedOption = backtrack?.searchTree
+    .flatMap((decision) => decision.options)
+    .find((option) => option.branchId === rejectedBranchId);
+
+  assert.ok(rejectedBranchId);
+  assert.equal(rejectedOption?.status, "rejected");
+  assert.ok(
+    rejectedOption?.rejectionReason === "contradiction" ||
+      rejectedOption?.rejectionReason === "exhausted",
+  );
+});
+
+test("remaining work exactly counts future color-attempt events", () => {
+  const trace = generateTrace(FOUR_COLORS);
+  const total = trace.at(-1)!.metrics.totalColorAttempts;
+
+  assert.match(REMAINING_WORK_DEFINITION, /Future try-color events/i);
+  assert.equal(trace[0].metrics.colorAttempts, 0);
+  assert.equal(trace[0].metrics.remainingColorAttempts, total);
+  assert.equal(trace.at(-1)!.metrics.remainingColorAttempts, 0);
+  for (const snapshot of trace) {
+    assert.equal(snapshot.metrics.totalColorAttempts, total);
+    assert.equal(
+      snapshot.metrics.remainingColorAttempts,
+      total - snapshot.metrics.colorAttempts,
+    );
+  }
+});
+
+test("propagation-off uses the same DFS but directly rejects neighbor conflicts", () => {
+  const withPropagation = generateTrace(FOUR_COLORS);
+  const withoutPropagation = generateTrace(FOUR_COLORS, {
+    propagationEnabled: false,
+  });
+  const final = withoutPropagation.at(-1)!;
+
+  assert.equal(withoutPropagation[0].propagationEnabled, false);
+  assert.equal(final.status, "solved");
+  assert.equal(final.metrics.domainReductions, 0);
+  assert.ok(
+    !withoutPropagation.some(
+      (snapshot) => snapshot.event.type === "forced-assignment",
+    ),
+  );
+  assert.ok(
+    final.metrics.totalColorAttempts >
+      withPropagation.at(-1)!.metrics.totalColorAttempts,
+  );
+  assert.ok(
+    withoutPropagation.some(
+      (snapshot) =>
+        snapshot.event.type === "contradiction" &&
+        snapshot.event.causeState !== undefined,
+    ),
+    "colors conflicting with assigned neighbors must be rejected",
+  );
+  for (const state of STATE_CODES) {
+    for (const neighbor of ADJACENCY[state]) {
+      assert.notEqual(final.assignments[state], final.assignments[neighbor]);
+    }
+  }
+});
+
+test("pathological propagation-off search ends honestly at its attempt limit", () => {
+  const trace = generateTrace(["red", "blue", "gold"], {
+    propagationEnabled: false,
+    maxColorAttempts: 20,
+  });
+  const final = trace.at(-1)!;
+
+  assert.equal(final.status, "limit-reached");
+  assert.equal(final.event.type, "limit-reached");
+  assert.match(final.event.narration, /not an unsatisfiability proof/i);
+  assert.equal(final.metrics.totalColorAttempts, 20);
+  assert.equal(final.metrics.colorAttempts, 20);
+  assert.equal(final.metrics.remainingColorAttempts, 0);
+  assert.equal(final.metrics.runTerminatedByLimit, true);
+  assert.equal(trace[0].metrics.remainingColorAttempts, 20);
+  assert.ok(
+    Object.keys(final.assignments).length > 0,
+    "the capped terminal snapshot should preserve the branch being inspected",
+  );
+  assert.ok(final.stack.length > 0);
+});
+
 test("small palettes record contradictions, backtracking, and unsatisfiability", () => {
   for (const palette of [["red"], ["red", "blue"], ["red", "blue", "gold"]]) {
     const trace = generateTrace(palette);
@@ -144,8 +257,15 @@ test("snapshots are immutable and palette validation rejects ambiguous ids", () 
   assert.ok(Object.isFrozen(snapshot.domains.AL));
   assert.ok(Object.isFrozen(snapshot.assignments));
   assert.ok(Object.isFrozen(snapshot.stack));
+  assert.ok(Object.isFrozen(snapshot.searchTree));
+  assert.ok(Object.isFrozen(snapshot.searchTree[0]));
+  assert.ok(Object.isFrozen(snapshot.searchTree[0].options));
   assert.ok(Object.isFrozen(snapshot.metrics));
   assert.throws(() => generateTrace(["red", "red"]), /unique/i);
   assert.throws(() => generateTrace([""]), /non-empty/i);
   assert.throws(() => generateTrace(["red"], { maxSnapshots: 1 }), /at least 2/i);
+  assert.throws(
+    () => generateTrace(["red"], { maxColorAttempts: 0 }),
+    /positive integer/i,
+  );
 });

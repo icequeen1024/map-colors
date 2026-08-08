@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,49 +12,45 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host =
-    requestHeaders.get("x-forwarded-host") ??
-    requestHeaders.get("host") ??
-    "localhost:3000";
-  const protocol =
-    requestHeaders.get("x-forwarded-proto") ??
-    (host.startsWith("localhost") ? "http" : "https");
-  const metadataBase = new URL(`${protocol}://${host}`);
-  const title = "Map Colors — Constraint Propagation, Made Visible";
-  const description =
-    "Watch domains shrink, decisions stack up, and depth-first search backtrack across a live U.S. map.";
+const title = "Map Colors — Constraint Propagation, Made Visible";
+const description =
+  "Watch domains shrink, decisions stack up, and depth-first search backtrack across a live U.S. map.";
+const siteUrl = new URL("https://icequeen1024.github.io/map-colors/");
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const socialImageUrl = new URL("og.png", siteUrl).href;
 
-  return {
-    metadataBase,
+export const metadata: Metadata = {
+  metadataBase: siteUrl,
+  title,
+  description,
+  alternates: {
+    canonical: siteUrl,
+  },
+  icons: {
+    icon: `${basePath}/favicon.png`,
+    shortcut: `${basePath}/favicon.png`,
+  },
+  openGraph: {
     title,
     description,
-    icons: {
-      icon: "/favicon.png",
-      shortcut: "/favicon.png",
-    },
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      images: [
-        {
-          url: "/og.png",
-          width: 1730,
-          height: 909,
-          alt: "Map Colors constraint-propagation lesson shown on a colorful United States map",
-        },
-      ],
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: ["/og.png"],
-    },
-  };
-}
+    type: "website",
+    url: siteUrl,
+    images: [
+      {
+        url: socialImageUrl,
+        width: 1730,
+        height: 909,
+        alt: "Map Colors constraint-propagation lesson shown on a colorful United States map",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: [socialImageUrl],
+  },
+};
 
 export default function RootLayout({
   children,

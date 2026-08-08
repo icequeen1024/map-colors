@@ -5,27 +5,16 @@ import test from "node:test";
 const templateRoot = new URL("../", import.meta.url);
 
 async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
+  const html = await readFile(
+    new URL("../dist/client/index.html", import.meta.url),
+    "utf8",
   );
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
 }
 
-test("server-renders the complete teaching interface", async () => {
+test("statically renders the complete teaching interface", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -42,8 +31,21 @@ test("server-renders the complete teaching interface", async () => {
   assert.match(html, /Step/);
   assert.match(html, /State inspector/);
   assert.match(html, /Decision stack/);
+  assert.match(html, /Color attempts remaining/);
+  assert.match(html, /Propagation <!-- -->ON/);
+  assert.match(html, /Constraint propagation/);
+  assert.match(html, /DFS tree/);
+  assert.match(html, /rejected \/ pruned/);
+  assert.match(
+    html,
+    /aria-label="[^"]*color attempts remaining with constraint propagation on"/i,
+  );
+  assert.match(html, /aria-pressed="true"/);
   assert.match(html, /Interactive map of the 50 United States/);
-  assert.match(html, /http:\/\/localhost(?::3000)?\/og\.png/);
+  assert.match(
+    html,
+    /https:\/\/icequeen1024\.github\.io\/map-colors\/og\.png/,
+  );
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -63,8 +65,8 @@ test("ships the licensed 50-state map and removes starter-only UI", async () => 
   assert.match(mapAsset, /CC0-1\.0/);
 
   assert.match(page, /<MapColoringLab \/>/);
-  assert.match(layout, /generateMetadata/);
-  assert.match(layout, /\/og\.png/);
+  assert.match(layout, /export const metadata/);
+  assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
