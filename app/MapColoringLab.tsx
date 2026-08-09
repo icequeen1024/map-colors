@@ -9,6 +9,8 @@ import {
   type LearnerIntervention,
   type SearchTreeDecision,
   type SearchTreeOption,
+  type SearchFrame,
+  type SolverEvent,
   type StateCode,
   type TraversalDirection,
 } from "@/lib/solver";
@@ -52,12 +54,12 @@ const STATE_OPTIONS = STATE_CODES.map((code) => [code, STATE_NAMES[code]] as con
   a[1].localeCompare(b[1]),
 );
 
-function colorName(colorId: string | undefined, palette: PaletteColor[]) {
+function colorName(colorId: string | undefined, palette: readonly PaletteColor[]) {
   if (!colorId) return "—";
   return palette.find((color) => color.id === colorId)?.name ?? colorId;
 }
 
-function paletteText(text: string, palette: PaletteColor[]) {
+function paletteText(text: string, palette: readonly PaletteColor[]) {
   return palette.reduce(
     (copy, color) => copy.replaceAll(color.id, color.name.toLocaleLowerCase()),
     text,
@@ -169,7 +171,7 @@ function logRemainingPercent(remaining: string, total: string) {
 
 function teachingNarration(
   event: { type: string; narration: string },
-  palette: PaletteColor[],
+  palette: readonly PaletteColor[],
 ) {
   if (event.type === "limit-reached") {
     return "The comparison reached its computation safety limit before search finished.";
@@ -179,22 +181,137 @@ function teachingNarration(
 
 function teachingTitle(
   event: { type: string; title: string },
-  palette: PaletteColor[],
+  palette: readonly PaletteColor[],
 ) {
   return event.type === "limit-reached"
     ? "Computation safety limit reached"
     : paletteText(event.title, palette);
 }
 
+function treeEventPresentation(
+  event: SolverEvent,
+  palette: readonly PaletteColor[],
+) {
+  const stateName = event.state ? STATE_NAMES[event.state] : undefined;
+  const causeName = event.causeState ? STATE_NAMES[event.causeState] : undefined;
+  const eventColor = colorName(event.colorId, palette);
+
+  switch (event.type) {
+    case "ready":
+      return {
+        mark: "○",
+        label: "Ready",
+        badge: "READY",
+        detail: "No DFS branch is active yet; Step will select the first state.",
+      };
+    case "human-assignment":
+      return {
+        mark: "H",
+        label: "Human constraint",
+        badge: `FIX ${event.state ?? ""}`.trim(),
+        detail: `${stateName ?? "This state"} is fixed before DFS, so no backtrack can undo it.`,
+      };
+    case "select-variable":
+      return {
+        mark: "?",
+        label: "Choose state",
+        badge: `SELECT ${event.state ?? ""}`.trim(),
+        detail: `${stateName ?? "A state"} is the highlighted decision node; no color branch has been entered yet.`,
+      };
+    case "try-color":
+      return {
+        mark: "→",
+        label: "Try branch",
+        badge: `TRY ${event.colorId ?? ""}`.trim(),
+        detail: `${stateName ?? "The state"} enters the ${eventColor} branch along the bold path.`,
+      };
+    case "remove-color":
+      return {
+        mark: "−",
+        label: "Propagate",
+        badge: `PRUNE ${event.state ?? ""}`.trim(),
+        detail: `${causeName ?? "The assigned state"} removes ${eventColor} from ${stateName ?? "its neighbor"}; the tree tags the change at the current endpoint without adding a choice.`,
+      };
+    case "forced-assignment":
+      return {
+        mark: "!",
+        label: "Forced assignment",
+        badge: `FORCE ${event.state ?? ""}`.trim(),
+        detail: `Propagation assigns ${stateName ?? "the state"} ${eventColor}; the tree tags it at the current endpoint without creating another DFS choice.`,
+      };
+    case "contradiction":
+      return {
+        mark: "×",
+        label: "Contradiction",
+        badge: "CONFLICT",
+        detail: `${stateName ?? "This state"} proves the highlighted branch impossible.`,
+      };
+    case "backtrack":
+      return {
+        mark: "↶",
+        label: "Backtrack",
+        badge: `UNDO ${event.state ?? ""}`.trim(),
+        detail: `${stateName ?? "The state"} = ${eventColor} is crossed out; the purple endpoint marks where search retreats.`,
+      };
+    case "solved":
+      return {
+        mark: "✓",
+        label: "Solved",
+        badge: "SOLUTION",
+        detail: "The bold colored route shows the DFS choices that led to a complete coloring.",
+      };
+    case "unsatisfiable":
+      return {
+        mark: "∅",
+        label: "Exhausted",
+        badge: "NO SOLUTION",
+        detail: "No complete coloring remains; the highlighted endpoint is the final failed DFS branch when search created one.",
+      };
+    case "limit-reached":
+      return {
+        mark: "Ⅱ",
+        label: "Stopped early",
+        badge: "LIMIT",
+        detail: "The highlighted endpoint shows where search stopped at the safety limit.",
+      };
+  }
+}
+
 function DFSTree({
   decisions,
   palette,
+  event,
+  stack,
+  stepNumber,
 }: {
   decisions: readonly SearchTreeDecision[];
   palette: readonly PaletteColor[];
+  event: SolverEvent;
+  stack: readonly SearchFrame[];
+  stepNumber: number;
 }) {
   const treeRef = useRef<HTMLDivElement>(null);
   const latestDecisionId = decisions.at(-1)?.id;
+  const pathBranchIds = useMemo(
+    () => new Set(stack.map((frame) => frame.branchId)),
+    [stack],
+  );
+  const lastAttemptedBranchId = useMemo(() => {
+    for (let decisionIndex = decisions.length - 1; decisionIndex >= 0; decisionIndex -= 1) {
+      const options = decisions[decisionIndex].options;
+      for (let optionIndex = options.length - 1; optionIndex >= 0; optionIndex -= 1) {
+        if (options[optionIndex].branchId) return options[optionIndex].branchId;
+      }
+    }
+    return undefined;
+  }, [decisions]);
+  const needsTerminalFallback = event.type === "unsatisfiable" || event.type === "limit-reached";
+  const currentBranchId = stack.at(-1)?.branchId ?? (needsTerminalFallback ? lastAttemptedBranchId : undefined);
+  const currentDecisionId = event.type === "select-variable" || (needsTerminalFallback && !currentBranchId)
+    ? latestDecisionId
+    : undefined;
+  const eventPresentation = treeEventPresentation(event, palette);
+  const eventSummary = teachingTitle(event, palette);
   const { roots, childrenByBranch } = useMemo(() => {
     const children = new Map<string, SearchTreeDecision[]>();
     for (const decision of decisions) {
@@ -213,14 +330,17 @@ function DFSTree({
   useEffect(() => {
     const viewport = treeRef.current;
     if (!viewport) return;
+    const currentEventNode = viewport.querySelector<HTMLElement>(
+      '[data-current-tree-event="true"]',
+    );
     const liveBranches = viewport.querySelectorAll<HTMLElement>(
-      ".tree-branch-node.tree-option--active, .tree-branch-node.tree-option--solution",
+      ".tree-branch.is-on-path > .tree-branch-node",
     );
     const activeBranch = liveBranches[liveBranches.length - 1];
     const latestDecision = latestDecisionId
       ? viewport.querySelector<HTMLElement>(`[data-decision-id="${latestDecisionId}"]`)
       : null;
-    const focusNode = activeBranch ?? latestDecision;
+    const focusNode = currentEventNode ?? activeBranch ?? latestDecision;
     if (!focusNode) return;
 
     const viewportBounds = viewport.getBoundingClientRect();
@@ -238,38 +358,66 @@ function DFSTree({
 
     viewport.scrollTop = Math.max(0, targetTop);
     viewport.scrollLeft = Math.max(0, targetLeft);
-  }, [decisions, latestDecisionId]);
+  }, [decisions, latestDecisionId, stepNumber]);
 
   function renderDecision(decision: SearchTreeDecision) {
     const active = decision.options.some((option) => option.status === "active");
     const solution = decision.options.some((option) => option.status === "solution");
+    const pathOption = decision.options.find(
+      (option) => option.branchId && pathBranchIds.has(option.branchId),
+    );
+    const pathColor = pathOption
+      ? palette.find((color) => color.id === pathOption.colorId)?.hex
+      : undefined;
+    const onPath = pathOption !== undefined;
+    const isCurrentDecision = currentDecisionId === decision.id;
     const exhausted = decision.options.every(
       (option) => option.status === "pruned" || option.status === "rejected",
     );
 
     return (
       <li
-        className={`tree-decision${active ? " is-live" : ""}${solution ? " is-solution" : ""}${exhausted ? " is-exhausted" : ""}`}
+        className={`tree-decision${active ? " is-live" : ""}${solution ? " is-solution" : ""}${exhausted ? " is-exhausted" : ""}${onPath ? " is-on-path" : ""}${isCurrentDecision ? " is-current-event" : ""}`}
         key={decision.id}
+        style={pathColor ? { "--path-color": pathColor } as React.CSSProperties : undefined}
       >
-        <div className="tree-decision-node" data-decision-id={decision.id}>
+        <div
+          className="tree-decision-node"
+          data-decision-id={decision.id}
+          data-current-tree-event={isCurrentDecision ? "true" : undefined}
+          aria-current={isCurrentDecision ? "step" : undefined}
+          aria-label={`${STATE_NAMES[decision.state]} decision at depth ${decision.depth}${isCurrentDecision ? `. Current step: ${eventSummary}` : ""}`}
+        >
           <span>Depth {decision.depth}</span>
           <strong>{decision.state}</strong>
           <small>{STATE_NAMES[decision.state]}</small>
+          {isCurrentDecision && (
+            <em className="tree-event-badge" aria-hidden="true">
+              {eventPresentation.badge}
+            </em>
+          )}
         </div>
         <ol className="tree-branches" aria-label={`${STATE_NAMES[decision.state]} color branches`}>
           {decision.options.map((option) => {
             const color = palette.find((item) => item.id === option.colorId);
             const statusLabel = optionStatusLabel(option);
+            const optionOnPath = option.branchId !== undefined && pathBranchIds.has(option.branchId);
+            const isCurrentOption = option.branchId !== undefined && option.branchId === currentBranchId && event.type !== "select-variable";
             const optionChildren = option.branchId
               ? childrenByBranch.get(option.branchId) ?? []
               : [];
 
             return (
-              <li className="tree-branch" key={option.colorId}>
+              <li
+                className={`tree-branch${optionOnPath ? " is-on-path" : ""}${isCurrentOption ? " is-current-event" : ""}`}
+                key={option.colorId}
+                style={{ "--path-color": color?.hex ?? "#777" } as React.CSSProperties}
+              >
                 <div
                   className={`tree-branch-node tree-option--${option.status}`}
-                  aria-label={`${color?.name ?? option.colorId}: ${statusLabel}`}
+                  data-current-tree-event={isCurrentOption ? "true" : undefined}
+                  aria-current={isCurrentOption ? "step" : undefined}
+                  aria-label={`${color?.name ?? option.colorId}: ${statusLabel}${isCurrentOption ? `. Current step: ${eventSummary}` : ""}`}
                   title={`${color?.name ?? option.colorId}: ${statusLabel}`}
                 >
                   <i style={{ "--token-color": color?.hex ?? "#777" } as React.CSSProperties}>
@@ -278,9 +426,14 @@ function DFSTree({
                   <span>{color?.name ?? option.colorId}</span>
                   <b aria-hidden="true">{optionMark(option.status)}</b>
                   <small>{statusLabel}</small>
+                  {isCurrentOption && (
+                    <em className="tree-event-badge" aria-hidden="true">
+                      {eventPresentation.badge}
+                    </em>
+                  )}
                 </div>
                 {optionChildren.length > 0 && (
-                  <ol className="tree-child-decisions">
+                  <ol className={`tree-child-decisions${optionOnPath ? " is-path-continuation" : ""}`}>
                     {optionChildren.map(renderDecision)}
                   </ol>
                 )}
@@ -293,18 +446,30 @@ function DFSTree({
   }
 
   return (
-    <section className="dfs-tree" aria-labelledby="tree-heading">
+    <section className={`dfs-tree dfs-tree--event-${event.type}`} aria-labelledby="tree-heading">
       <div className="dfs-tree-top">
         <div className="dfs-tree-heading">
           <div>
             <p className="kicker">Branching search history</p>
             <h3 id="tree-heading">DFS tree</h3>
           </div>
-          <span>{decisions.length} visible nodes</span>
+          <span>{decisions.length} visible nodes · path {stack.length} / {STATE_CODES.length}</span>
         </div>
         <div className="tree-key" aria-label="Tree option key">
-          <span><b className="tree-key-live">→</b> exploring</span>
+          <span><b className="tree-key-live">━</b> bold = current DFS route</span>
+          <span><b className="tree-key-event">●</b> outlined = this step</span>
           <span><b className="tree-key-cut">×</b> rejected / pruned</span>
+        </div>
+        <div
+          className="tree-live-step"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label={`Tree step ${stepNumber}: ${eventSummary}. ${eventPresentation.detail}`}
+        >
+          <span><b aria-hidden="true">{eventPresentation.mark}</b> Step {stepNumber} · {eventPresentation.label}</span>
+          <strong>{eventSummary}</strong>
+          <small>{eventPresentation.detail}</small>
         </div>
       </div>
       <div className="dfs-tree-viewport" ref={treeRef}>
@@ -315,7 +480,18 @@ function DFSTree({
             </ol>
           </div>
         ) : (
-          <p className="tree-empty">Press Step to reveal the first decision and its color branches.</p>
+          <div className="tree-canvas tree-canvas--empty">
+            <div
+              className="tree-presearch-node is-current-event"
+              data-current-tree-event="true"
+              aria-current="step"
+              aria-label={`Before depth-first search. ${eventSummary}. ${eventPresentation.detail}`}
+            >
+              <span>Before depth-first search</span>
+              <strong>{eventPresentation.badge}</strong>
+              <small>{eventPresentation.detail}</small>
+            </div>
+          </div>
         )}
       </div>
     </section>
@@ -1001,7 +1177,13 @@ export function MapColoringLab() {
                   />
                 )}
               </div>
-              <DFSTree decisions={snapshot.searchTree} palette={palette} />
+              <DFSTree
+                decisions={snapshot.searchTree}
+                palette={palette}
+                event={event}
+                stack={snapshot.stack}
+                stepNumber={cursor + 1}
+              />
             </div>
             <details className="state-finder">
               <summary>Find a state by name</summary>

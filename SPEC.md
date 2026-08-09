@@ -68,6 +68,7 @@ The primary viewport should prioritize the map, not generic dashboard chrome.
 - Clicking, tapping, or keyboard-focusing a state opens its details without changing the solver. An adjacent, explicit guidance action is required to alter the next choice.
 - Hover/focus reveals the state name, assigned value, full domain, and land-border neighbors.
 - An actual branching depth-first-search tree sits directly below the map at every viewport width. Decision nodes connect to separate color-option branches and then to their descendant decisions, so the structure cannot collapse into a flat path ledger. The tree lives in a limited-height pane that scrolls in both directions and automatically follows the deepest active branch as the trace advances. The map and tree advance from the same snapshot so the current state, attempted color, contradiction, and backtrack are always synchronized.
+- Every displayed solver event must produce a visible change inside the tree area, including events that do not create a DFS node. A compact current-step strip names the action; the complete root-to-current route is bold and colored by its chosen branches; the exact decision or color endpoint for the current event is outlined and tagged. Propagation reductions and forced assignments remain attached to the active DFS endpoint, contradictions mark the failing endpoint, and backtracking both crosses out the rejected choice and marks its endpoint with the distinct retreat color. Human-fixed assignments and other pre-search events use a visible “before DFS” node until the first decision exists.
 - Each tree decision shows its color candidates in palette order. Tried candidates retain their outcome; rejected or pruned candidates are visibly crossed out with a text/icon cue, and the active candidate is highlighted without relying on color alone.
 - The tree may window older abandoned branches to control memory, but it must preserve every level of the active root-to-leaf path, clearly indicate its current depth out of 50, retain the most recent abandoned branch, and keep parent/child connectors visible.
 
@@ -103,7 +104,7 @@ Rich explanation and inspection tools live in a sidebar that is collapsed by def
 
 ### 5.5 Search and progress panel
 
-- The visible DFS tree is the primary search view; a compact active-path summary may supplement it when useful.
+- The visible DFS tree is the primary search view. Its current-step strip, bold colored route, outlined endpoint, and text tag must update on every Step event rather than only when the tree gains a node.
 - Backtracked branches and rejected color candidates remain visible as struck-through or dimmed entries so the learner sees exactly what was abandoned.
 - Counters for assignments, domain reductions, backtracks, and search depth.
 - A prominent **remaining search space** number reports the exact count of complete 50-state color assignments that have not yet been eliminated. A fresh run with `k` palette colors starts at exactly `k^50`, including assignments that will later prove invalid.
@@ -180,7 +181,7 @@ The first version is complete when:
 8. The experience works with keyboard-only navigation, reduced motion, and small screens.
 9. Automated tests and the production build pass.
 10. Starter copy, starter preview code, and unused starter-only dependencies are removed; repository documentation describes the finished product and its commands.
-11. The DFS tree is directly below the map, visibly connects decisions to color branches and descendants, auto-scrolls to the active branch, and crosses out rejected/pruned candidates.
+11. The DFS tree is directly below the map, visibly connects decisions to color branches and descendants, auto-scrolls to the active branch, crosses out rejected/pruned candidates, and visibly responds to every solver event with a synchronized current-step label, highlighted endpoint, and bold colored route.
 12. A learner can switch constraint propagation on/off and compare the same exact remaining-search-space metric, which starts at `k^50`, never increases, and does not decrease merely because a branch is tried.
 13. The static production site is delivered through GitHub Pages, with no ChatGPT Sites project binding in the repository.
 14. A compact sticky monitor keeps remaining search space, solver status, propagation mode, and speed visible while the default-collapsed details sidebar allows the main map-and-tree area to expand.

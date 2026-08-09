@@ -57,6 +57,10 @@ test("statically renders the complete teaching interface", async () => {
   assert.match(html, /Select a state first/);
   assert.match(html, /Branching search history/);
   assert.match(html, /DFS tree/);
+  assert.match(html, /bold = current DFS route/);
+  assert.match(html, /outlined = this step/);
+  assert.match(html, /Step <!-- -->1<!-- --> · <!-- -->Ready/);
+  assert.match(html, /No DFS branch is active yet/);
   assert.match(html, /rejected \/ pruned/);
   assert.match(
     html,
@@ -95,7 +99,13 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(labSource, /className="tree-branches"/);
-  assert.match(labSource, /className="tree-child-decisions"/);
+  assert.match(labSource, /className={`tree-child-decisions/);
+  assert.match(labSource, /data-current-tree-event/);
+  assert.match(labSource, /treeEventPresentation/);
+  assert.match(labSource, /pathBranchIds/);
+  assert.match(labSource, /lastAttemptedBranchId/);
+  assert.match(labSource, /is-path-continuation/);
+  assert.match(labSource, /aria-live="polite"/);
   assert.match(labSource, /guideNextDecision/);
   assert.match(labSource, /learnerInterventions/);
   assert.match(labSource, /fixedAssignments/);
@@ -105,7 +115,7 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   assert.match(labSource, /viewport\.scrollLeft = Math\.max/);
   assert.match(
     labStyles,
-    /\.dfs-tree-viewport\s*{[^}]*height:\s*390px;[^}]*overflow:\s*auto;/s,
+    /\.dfs-tree-viewport\s*{[^}]*height:\s*clamp\(260px,\s*48vh,\s*390px\);[^}]*overflow:\s*auto;/s,
   );
   assert.match(
     labStyles,
@@ -113,6 +123,10 @@ test("ships the licensed map and a bounded auto-following branching tree", async
   );
   assert.match(labStyles, /\.tree-branches::before/);
   assert.match(labStyles, /\.tree-child-decisions::before/);
+  assert.match(labStyles, /\.tree-live-step/);
+  assert.match(labStyles, /\.tree-branch\.is-on-path/);
+  assert.match(labStyles, /\.tree-event-badge/);
+  assert.match(labStyles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(labStyles, /\.fixed-color-options/);
   assert.match(mapSource, /Human-assigned and locked/);
   assert.match(mapSource, /usMap__lockShackle/);
